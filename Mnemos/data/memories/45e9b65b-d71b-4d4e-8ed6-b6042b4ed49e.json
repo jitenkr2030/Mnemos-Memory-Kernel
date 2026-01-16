@@ -1,0 +1,12 @@
+{
+  "id": "45e9b65b-d71b-4d4e-8ed6-b6042b4ed49e",
+  "timestamp": "2026-01-16T06:03:14.702552",
+  "raw_text": "This is a simple test thought",
+  "intent": "unknown",
+  "topics": [],
+  "entities": [],
+  "confidence": 0.3,
+  "evolution_ref": [],
+  "embedding": null,
+  "created_at": "2026-01-16T06:03:14.706990"
+}

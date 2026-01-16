@@ -13,12 +13,12 @@ from datetime import datetime, timedelta
 import tempfile
 import shutil
 
-from src.kernel.memory_node import MemoryNode, MemoryIntent, Entity, EntityType
-from src.kernel.kernel import MnemosKernel, TranscriptInput
-from src.recall.query_parser import QueryParser, ParsedQuery, QueryType, TemporalQualifier
-from src.recall.importance_scorer import ImportanceScorer, ImportanceScore
-from src.recall.insight_generator import InsightGenerator, Insight, InsightCollection, InsightType
-from src.recall.recall_engine import RecallEngine, RecallResult
+from mnemos.kernel.memory_node import MemoryNode, MemoryIntent, Entity, EntityType
+from mnemos.kernel.kernel import MnemosKernel, TranscriptInput
+from mnemos.recall.query_parser import QueryParser, ParsedQuery, QueryType, TemporalQualifier
+from mnemos.recall.importance_scorer import ImportanceScorer, ImportanceScore
+from mnemos.recall.insight_generator import InsightGenerator, Insight, InsightCollection, InsightType
+from mnemos.recall.recall_engine import RecallEngine, RecallResult
 
 
 class TestQueryParser:

@@ -1,0 +1,52 @@
+{
+  "primary_index": {
+    "45e9b65b-d71b-4d4e-8ed6-b6042b4ed49e": {
+      "file": "45e9b65b-d71b-4d4e-8ed6-b6042b4ed49e.json",
+      "timestamp": "2026-01-16T06:03:14.702552",
+      "intent": "unknown",
+      "topics": [],
+      "confidence": 0.3
+    },
+    "83e36f54-997e-453e-a2a5-7fb08e873c34": {
+      "file": "83e36f54-997e-453e-a2a5-7fb08e873c34.json",
+      "timestamp": "2026-01-16T06:03:21.392266",
+      "intent": "unknown",
+      "topics": [],
+      "confidence": 0.3
+    },
+    "e1d6ab0b-23c9-4d7c-897f-a3f1ae646006": {
+      "file": "e1d6ab0b-23c9-4d7c-897f-a3f1ae646006.json",
+      "timestamp": "2026-01-16T06:03:38.622334",
+      "intent": "unknown",
+      "topics": [],
+      "confidence": 0.3
+    },
+    "9b2b74e7-90d4-4dd8-bd09-4d122f288d4c": {
+      "file": "9b2b74e7-90d4-4dd8-bd09-4d122f288d4c.json",
+      "timestamp": "2026-01-16T06:07:07.796703",
+      "intent": "unknown",
+      "topics": [],
+      "confidence": 0.3
+    }
+  },
+  "topic_index": {},
+  "temporal_index": [
+    [
+      "2026-01-16T06:03:14.702552",
+      "45e9b65b-d71b-4d4e-8ed6-b6042b4ed49e"
+    ],
+    [
+      "2026-01-16T06:03:21.392266",
+      "83e36f54-997e-453e-a2a5-7fb08e873c34"
+    ],
+    [
+      "2026-01-16T06:03:38.622334",
+      "e1d6ab0b-23c9-4d7c-897f-a3f1ae646006"
+    ],
+    [
+      "2026-01-16T06:07:07.796703",
+      "9b2b74e7-90d4-4dd8-bd09-4d122f288d4c"
+    ]
+  ],
+  "last_updated": "2026-01-16T06:07:07.802389"
+}

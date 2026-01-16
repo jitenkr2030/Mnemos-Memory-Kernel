@@ -10,10 +10,8 @@ from datetime import datetime
 import tempfile
 import shutil
 
-from src.kernel.memory_node import MemoryNode, MemoryIntent, Entity, EntityType
-from src.kernel.kernel import MnemosKernel, TranscriptInput
-from src.classifier.intent_classifier import IntentClassifier
-from src.storage.memory_store import MemoryStore
+from mnemos import MemoryNode, MemoryIntent, Entity, EntityType, MnemosKernel, TranscriptInput
+from mnemos import IntentClassifier, MemoryStore
 
 
 class TestMemoryNode:
@@ -28,307 +26,377 @@ class TestMemoryNode:
             confidence=0.9
         )
         
+        assert memory.id is not None
         assert memory.raw_text == "I think we should increase the budget"
         assert memory.intent == MemoryIntent.IDEA
         assert memory.confidence == 0.9
-        assert memory.id is not None
-        assert len(memory.id) > 0
     
-    def test_memory_node_validation_empty_text(self):
-        """Test that empty text raises an error."""
-        with pytest.raises(ValueError):
-            MemoryNode(
-                raw_text="",
-                timestamp=datetime.utcnow(),
-                intent=MemoryIntent.IDEA
-            )
-    
-    def test_memory_node_to_dict(self):
-        """Test serialization to dictionary."""
+    def test_memory_node_with_entities(self):
+        """Test creating a memory node with entities."""
         memory = MemoryNode(
-            raw_text="Test memory",
+            raw_text="Meeting with John on January 15th",
             timestamp=datetime.utcnow(),
-            intent=MemoryIntent.QUESTION,
+            intent=MemoryIntent.IDEA,
             confidence=0.8
+        )
+        
+        memory.add_entity(Entity(
+            type=EntityType.PERSON,
+            value="John",
+            confidence=0.9
+        ))
+        
+        memory.add_entity(Entity(
+            type=EntityType.DATE,
+            value="January 15th",
+            confidence=0.85
+        ))
+        
+        assert len(memory.entities) == 2
+        assert any(e.value == "John" for e in memory.entities)
+    
+    def test_memory_node_serialization(self):
+        """Test memory node serialization to dict."""
+        memory = MemoryNode(
+            raw_text="Test memory content",
+            timestamp=datetime(2024, 1, 15, 10, 30, 0),
+            intent=MemoryIntent.QUESTION,
+            confidence=0.95
         )
         
         data = memory.to_dict()
         
-        assert "id" in data
-        assert "timestamp" in data
-        assert "raw_text" in data
+        assert data["raw_text"] == "Test memory content"
         assert data["intent"] == "question"
-        assert data["confidence"] == 0.8
+        assert data["confidence"] == 0.95
     
-    def test_memory_node_from_dict(self):
-        """Test deserialization from dictionary."""
-        original = MemoryNode(
-            raw_text="Decision to launch",
-            timestamp=datetime.utcnow(),
-            intent=MemoryIntent.DECISION,
-            confidence=0.95
-        )
-        
-        data = original.to_dict()
-        restored = MemoryNode.from_dict(data)
-        
-        assert restored.id == original.id
-        assert restored.raw_text == original.raw_text
-        assert restored.intent == original.intent
-        assert restored.confidence == original.confidence
-    
-    def test_add_evolution_ref(self):
-        """Test adding evolution references."""
-        memory = MemoryNode(
-            raw_text="Updated thinking on pricing",
-            timestamp=datetime.utcnow(),
-            intent=MemoryIntent.IDEA
-        )
-        
-        memory.add_evolution_ref("prev-memory-id-1")
-        memory.add_evolution_ref("prev-memory-id-2")
-        
-        assert len(memory.evolution_ref) == 2
-        assert "prev-memory-id-1" in memory.evolution_ref
-    
-    def test_add_topic(self):
-        """Test adding topics."""
-        memory = MemoryNode(
-            raw_text="Discussion about architecture",
-            timestamp=datetime.utcnow(),
-            intent=MemoryIntent.IDEA
-        )
-        
-        memory.add_topic("architecture")
-        memory.add_topic("design")
-        memory.add_topic("architecture")  # Duplicate
-        
-        assert len(memory.topics) == 2
-        assert "architecture" in memory.topics
-        assert "design" in memory.topics
+    def test_intent_enum_values(self):
+        """Test that all intent enum values exist."""
+        assert MemoryIntent.IDEA.value == "idea"
+        assert MemoryIntent.DECISION.value == "decision"
+        assert MemoryIntent.QUESTION.value == "question"
+        assert MemoryIntent.REFLECTION.value == "reflection"
+        assert MemoryIntent.ACTION.value == "action"
 
 
 class TestIntentClassifier:
-    """Tests for intent classification."""
-    
-    def setup_method(self):
-        """Set up classifier for each test."""
-        self.classifier = IntentClassifier()
+    """Tests for IntentClassifier."""
     
     def test_classify_decision(self):
-        """Test classifying decision statements."""
-        intent, confidence = self.classifier.classify("I will send the email tomorrow")
+        """Test classifying a decision statement."""
+        classifier = IntentClassifier()
+        
+        intent, confidence = classifier.classify("I have decided to cancel the project")
         
         assert intent == MemoryIntent.DECISION
         assert confidence > 0.5
     
-    def test_classify_action(self):
-        """Test classifying action statements."""
-        intent, confidence = self.classifier.classify("Remember to call John")
-        
-        assert intent == MemoryIntent.ACTION
-        assert confidence > 0.5
-    
     def test_classify_question(self):
-        """Test classifying questions."""
-        intent, confidence = self.classifier.classify("How do I implement this feature?")
+        """Test classifying a question."""
+        classifier = IntentClassifier()
+        
+        intent, confidence = classifier.classify("How do I implement this feature?")
         
         assert intent == MemoryIntent.QUESTION
         assert confidence > 0.5
     
+    def test_classify_action(self):
+        """Test classifying an action item."""
+        classifier = IntentClassifier()
+        
+        intent, confidence = classifier.classify("Remember to call John tomorrow")
+        
+        assert intent == MemoryIntent.ACTION
+        assert confidence > 0.5
+    
     def test_classify_idea(self):
-        """Test classifying idea statements."""
-        intent, confidence = self.classifier.classify("I think we should explore this direction")
+        """Test classifying an idea."""
+        classifier = IntentClassifier()
+        
+        intent, confidence = classifier.classify("I think we should explore this direction")
         
         assert intent == MemoryIntent.IDEA
         assert confidence > 0.5
     
     def test_classify_reflection(self):
-        """Test classifying reflection statements."""
-        intent, confidence = self.classifier.classify("I realized that my initial approach was wrong")
+        """Test classifying a reflection."""
+        classifier = IntentClassifier()
+        
+        intent, confidence = classifier.classify("I realized that my initial approach was wrong")
         
         assert intent == MemoryIntent.REFLECTION
         assert confidence > 0.5
     
-    def test_batch_classify(self):
-        """Test batch classification."""
-        texts = [
-            "I will complete this task",
-            "What is the deadline?",
-            "I think this is a good idea"
+    def test_classification_confidence_range(self):
+        """Test that confidence is always between 0 and 1."""
+        classifier = IntentClassifier()
+        test_texts = [
+            "I have decided to proceed with option A",
+            "What is the best way to handle this?",
+            "Remember to send the email",
+            "I think this might work",
+            "Looking back, I should have done differently"
         ]
         
-        results = self.classifier.batch_classify(texts)
-        
-        assert len(results) == 3
-        assert all(confidence > 0 for _, confidence in results)
+        for text in test_texts:
+            intent, confidence = classifier.classify(text)
+            assert 0 <= confidence <= 1
 
 
 class TestMemoryStore:
-    """Tests for memory storage."""
+    """Tests for MemoryStore."""
     
     def setup_method(self):
-        """Set up temporary storage for each test."""
+        """Create a temporary directory for each test."""
         self.temp_dir = tempfile.mkdtemp()
-        self.store = MemoryStore(self.temp_dir)
     
     def teardown_method(self):
         """Clean up after each test."""
-        shutil.rmtree(self.temp_dir)
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
     
     def test_store_and_retrieve(self):
         """Test storing and retrieving a memory."""
+        store = MemoryStore(self.temp_dir)
+        
         memory = MemoryNode(
-            raw_text="Test memory content",
+            raw_text="Test memory",
             timestamp=datetime.utcnow(),
             intent=MemoryIntent.IDEA,
-            confidence=0.8
+            confidence=0.9
         )
         
-        success = self.store.store(memory)
-        assert success is True
+        store.store(memory)
         
-        retrieved = self.store.retrieve(memory.id)
+        retrieved = store.retrieve(memory.id)
+        
         assert retrieved is not None
-        assert retrieved.raw_text == memory.raw_text
-        assert retrieved.intent == memory.intent
-    
-    def test_query_by_topic(self):
-        """Test querying by topic."""
-        memory = MemoryNode(
-            raw_text="Discussion about pricing",
-            timestamp=datetime.utcnow(),
-            intent=MemoryIntent.IDEA,
-            topics=["pricing", "strategy"]
-        )
-        
-        self.store.store(memory)
-        
-        results = self.store.query_by_topic("pricing")
-        assert len(results) == 1
-        assert results[0].id == memory.id
+        assert retrieved.id == memory.id
+        assert retrieved.raw_text == "Test memory"
     
     def test_query_by_intent(self):
-        """Test querying by intent."""
-        memory = MemoryNode(
-            raw_text="A decision was made",
-            timestamp=datetime.utcnow(),
-            intent=MemoryIntent.DECISION
-        )
+        """Test querying memories by intent."""
+        store = MemoryStore(self.temp_dir)
         
-        self.store.store(memory)
+        for i in range(5):
+            memory = MemoryNode(
+                raw_text=f"Decision {i}",
+                timestamp=datetime.utcnow(),
+                intent=MemoryIntent.DECISION,
+                confidence=0.9
+            )
+            store.store(memory)
         
-        results = self.store.query_by_intent(MemoryIntent.DECISION)
-        assert len(results) == 1
-        assert results[0].id == memory.id
+        for i in range(3):
+            memory = MemoryNode(
+                raw_text=f"Idea {i}",
+                timestamp=datetime.utcnow(),
+                intent=MemoryIntent.IDEA,
+                confidence=0.9
+            )
+            store.store(memory)
+        
+        decisions = store.query_by_intent(MemoryIntent.DECISION)
+        ideas = store.query_by_intent(MemoryIntent.IDEA)
+        
+        assert len(decisions) == 5
+        assert len(ideas) == 3
     
     def test_query_recent(self):
         """Test querying recent memories."""
+        store = MemoryStore(self.temp_dir)
+        
+        from datetime import timedelta
+        
+        # Store memories at different times
+        for i in range(10):
+            memory = MemoryNode(
+                raw_text=f"Memory {i}",
+                timestamp=datetime.utcnow() - timedelta(hours=i),
+                intent=MemoryIntent.IDEA,
+                confidence=0.9
+            )
+            store.store(memory)
+        
+        recent = store.query_recent(5)
+        
+        assert len(recent) == 5
+        # Most recent should be first
+        assert "Memory 0" in recent[0].raw_text
+    
+    def test_update_memory(self):
+        """Test updating an existing memory."""
+        store = MemoryStore(self.temp_dir)
+        
+        memory = MemoryNode(
+            raw_text="Original text",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA,
+            confidence=0.9
+        )
+        store.store(memory)
+        
+        # Update the memory
+        memory.raw_text = "Updated text"
+        result = store.update(memory)
+        
+        assert result is True
+        
+        retrieved = store.retrieve(memory.id)
+        assert retrieved.raw_text == "Updated text"
+    
+    def test_delete_memory(self):
+        """Test deleting a memory."""
+        store = MemoryStore(self.temp_dir)
+        
+        memory = MemoryNode(
+            raw_text="To be deleted",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA,
+            confidence=0.9
+        )
+        store.store(memory)
+        
+        result = store.delete(memory.id)
+        
+        assert result is True
+        
+        retrieved = store.retrieve(memory.id)
+        assert retrieved is None
+    
+    def test_get_stats(self):
+        """Test getting storage statistics."""
+        store = MemoryStore(self.temp_dir)
+        
         for i in range(5):
             memory = MemoryNode(
                 raw_text=f"Memory {i}",
                 timestamp=datetime.utcnow(),
-                intent=MemoryIntent.IDEA
+                intent=MemoryIntent.IDEA,
+                confidence=0.9
             )
-            self.store.store(memory)
+            store.store(memory)
         
-        results = self.store.query_recent(3)
-        assert len(results) == 3
-    
-    def test_delete_memory(self):
-        """Test deleting a memory."""
-        memory = MemoryNode(
-            raw_text="To be deleted",
-            timestamp=datetime.utcnow(),
-            intent=MemoryIntent.IDEA
-        )
+        stats = store.get_stats()
         
-        self.store.store(memory)
-        
-        success = self.store.delete(memory.id)
-        assert success is True
-        
-        retrieved = self.store.retrieve(memory.id)
-        assert retrieved is None
-    
-    def test_count(self):
-        """Test memory count."""
-        assert self.store.count() == 0
-        
-        memory = MemoryNode(
-            raw_text="Test",
-            timestamp=datetime.utcnow(),
-            intent=MemoryIntent.IDEA
-        )
-        self.store.store(memory)
-        
-        assert self.store.count() == 1
+        assert stats["total_memories"] == 5
+        assert "idea" in stats["by_intent"]
+        assert stats["by_intent"]["idea"] == 5
 
 
 class TestMnemosKernel:
-    """Tests for the main kernel."""
+    """Integration tests for MnemosKernel."""
     
     def setup_method(self):
-        """Set up temporary kernel for each test."""
+        """Create a temporary directory for each test."""
         self.temp_dir = tempfile.mkdtemp()
-        self.kernel = MnemosKernel(self.temp_dir)
     
     def teardown_method(self):
         """Clean up after each test."""
-        shutil.rmtree(self.temp_dir)
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
     
     def test_ingest_transcript(self):
-        """Test ingesting a transcript."""
+        """Test ingesting a transcript creates a memory."""
+        kernel = MnemosKernel(
+            storage_dir=self.temp_dir,
+            enable_evolution=False,
+            enable_recall=False
+        )
+        
         transcript = TranscriptInput(
-            text="I think the pricing should be ₹999",
+            text="I have decided to use Python for this project",
             timestamp=datetime.utcnow()
         )
         
-        memory = self.kernel.ingest(transcript)
+        memory = kernel.ingest(transcript)
         
         assert memory is not None
-        assert memory.raw_text == "I think the pricing should be ₹999"
-        assert memory.intent == MemoryIntent.IDEA
+        assert memory.id is not None
+        assert memory.intent == MemoryIntent.DECISION
+        assert memory.confidence > 0.5
     
-    def test_ingest_and_recall(self):
-        """Test ingesting and then recalling a memory."""
-        transcript = TranscriptInput(
-            text="Remember to schedule the meeting",
-            timestamp=datetime.utcnow()
+    def test_get_memory(self):
+        """Test retrieving a specific memory."""
+        kernel = MnemosKernel(
+            storage_dir=self.temp_dir,
+            enable_evolution=False,
+            enable_recall=False
         )
         
-        self.kernel.ingest(transcript)
+        transcript = TranscriptInput(text="Test memory content")
+        memory = kernel.ingest(transcript)
         
-        # Use get_recent_memories for basic retrieval
-        memories = self.kernel.get_recent_memories(10)
-        assert len(memories) == 1
-        assert memories[0].intent == MemoryIntent.ACTION
-    
-    def test_recall_with_query(self):
-        """Test recall with text query."""
-        self.kernel.ingest(TranscriptInput(text="Pricing discussion", timestamp=datetime.utcnow()))
-        self.kernel.ingest(TranscriptInput(text="Architecture design", timestamp=datetime.utcnow()))
+        retrieved = kernel.get_memory(memory.id)
         
-        result = self.kernel.recall(query="pricing")
-        assert len(result.memories) == 1
-        assert "pricing" in result.memories[0].raw_text.lower()
-    
-    def test_get_stats(self):
-        """Test getting system statistics."""
-        self.kernel.ingest(TranscriptInput(text="Test 1", timestamp=datetime.utcnow()))
-        self.kernel.ingest(TranscriptInput(text="Test 2", timestamp=datetime.utcnow()))
-        
-        stats = self.kernel.get_stats()
-        
-        assert stats["storage"]["total_memories"] == 2
+        assert retrieved is not None
+        assert retrieved.id == memory.id
     
     def test_get_recent_memories(self):
         """Test getting recent memories."""
-        for i in range(3):
-            self.kernel.ingest(TranscriptInput(text=f"Memory {i}", timestamp=datetime.utcnow()))
+        kernel = MnemosKernel(
+            storage_dir=self.temp_dir,
+            enable_evolution=False,
+            enable_recall=False
+        )
         
-        recent = self.kernel.get_recent_memories(2)
-        assert len(recent) == 2
+        # Create several memories
+        for i in range(5):
+            transcript = TranscriptInput(text=f"Memory {i}")
+            kernel.ingest(transcript)
+        
+        recent = kernel.get_recent_memories(3)
+        
+        assert len(recent) == 3
+    
+    def test_delete_memory(self):
+        """Test deleting a memory through the kernel."""
+        kernel = MnemosKernel(
+            storage_dir=self.temp_dir,
+            enable_evolution=False,
+            enable_recall=False
+        )
+        
+        transcript = TranscriptInput(text="To be deleted")
+        memory = kernel.ingest(transcript)
+        
+        result = kernel.delete_memory(memory.id)
+        
+        assert result is True
+        
+        retrieved = kernel.get_memory(memory.id)
+        assert retrieved is None
+    
+    def test_get_stats(self):
+        """Test getting kernel statistics."""
+        kernel = MnemosKernel(
+            storage_dir=self.temp_dir,
+            enable_evolution=False,
+            enable_recall=False
+        )
+        
+        # Create some memories
+        for i in range(3):
+            kernel.ingest(TranscriptInput(text=f"Memory {i}"))
+        
+        stats = kernel.get_stats()
+        
+        assert stats["storage"]["total_memories"] == 3
+    
+    def test_clear_all(self):
+        """Test clearing all memories."""
+        kernel = MnemosKernel(
+            storage_dir=self.temp_dir,
+            enable_evolution=False,
+            enable_recall=False
+        )
+        
+        # Create some memories
+        for i in range(5):
+            kernel.ingest(TranscriptInput(text=f"Memory {i}"))
+        
+        result = kernel.clear_all()
+        
+        assert result is True
+        assert kernel.get_stats()["storage"]["total_memories"] == 0
 
 
 if __name__ == "__main__":

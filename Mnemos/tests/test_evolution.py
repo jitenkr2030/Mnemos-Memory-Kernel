@@ -13,11 +13,11 @@ from datetime import datetime, timedelta
 import tempfile
 import shutil
 
-from src.kernel.memory_node import MemoryNode, MemoryIntent, Entity, EntityType
-from src.kernel.kernel import MnemosKernel, TranscriptInput
-from src.evolution.linker import EvolutionLinker, MemoryLink, LinkType
-from src.evolution.comparator import EvolutionComparator, RelationshipResult, RelationshipType
-from src.evolution.summarizer import TemporalSummarizer, TemporalSummary, SummaryPeriod
+from mnemos.kernel.memory_node import MemoryNode, MemoryIntent, Entity, EntityType
+from mnemos.kernel.kernel import MnemosKernel, TranscriptInput
+from mnemos.evolution.linker import EvolutionLinker, MemoryLink, LinkType
+from mnemos.evolution.comparator import EvolutionComparator, RelationshipResult, RelationshipType
+from mnemos.evolution.summarizer import TemporalSummarizer, TemporalSummary, SummaryPeriod
 
 
 class TestEvolutionLinker:

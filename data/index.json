@@ -1,0 +1,30 @@
+{
+  "primary_index": {
+    "7f9ebb44-ecc9-46e7-94b8-1159b8231af2": {
+      "file": "7f9ebb44-ecc9-46e7-94b8-1159b8231af2.json",
+      "timestamp": "2026-01-16T06:03:08.730225",
+      "intent": "unknown",
+      "topics": [],
+      "confidence": 0.3
+    },
+    "baaa597b-b603-46eb-a152-c68d71b13f64": {
+      "file": "baaa597b-b603-46eb-a152-c68d71b13f64.json",
+      "timestamp": "2026-01-16T06:06:21.824656",
+      "intent": "unknown",
+      "topics": [],
+      "confidence": 0.3
+    }
+  },
+  "topic_index": {},
+  "temporal_index": [
+    [
+      "2026-01-16T06:03:08.730225",
+      "7f9ebb44-ecc9-46e7-94b8-1159b8231af2"
+    ],
+    [
+      "2026-01-16T06:06:21.824656",
+      "baaa597b-b603-46eb-a152-c68d71b13f64"
+    ]
+  ],
+  "last_updated": "2026-01-16T06:06:21.830665"
+}

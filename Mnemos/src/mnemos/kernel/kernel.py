@@ -6,7 +6,7 @@ the flow of data through the memory processing pipeline, from raw transcript
 ingestion to memory storage and retrieval.
 
 This module implements Layer 1 (Memory Kernel), Layer 2 (Evolution Intelligence),
-and Layer 3 (Recall Engine):
+Layer 3 (Recall Engine), and Layer 4 (Domain Constraints):
 - Memory ingestion from VoiceInk transcripts
 - Intent classification
 - Entity and topic extraction
@@ -14,6 +14,7 @@ and Layer 3 (Recall Engine):
 - Temporal summarization
 - Memory storage and retrieval
 - Intelligent recall with query parsing and importance scoring
+- Domain constraint validation and enforcement
 """
 
 from datetime import datetime, timedelta
@@ -27,6 +28,12 @@ from ..evolution.linker import EvolutionLinker, MemoryLink, LinkType
 from ..evolution.comparator import EvolutionComparator, RelationshipResult, RelationshipType
 from ..evolution.summarizer import TemporalSummarizer, TemporalSummary, SummaryPeriod
 from ..recall import RecallEngine, RecallResult
+from ..constraints import (
+    ConstraintEngine,
+    ConstraintEngineResult,
+    ConstraintRegistry,
+    BaseConstraint,
+)
 
 
 class TranscriptInput:
@@ -97,9 +104,10 @@ class MnemosKernel:
     1. Receives transcripts from VoiceInk
     2. Classifies memory intent
     3. Extracts entities and topics
-    4. Stores structured memories
-    5. Triggers evolution linking (Layer 2)
-    6. Provides intelligent recall (Layer 3)
+    4. Validates against domain constraints (Layer 4)
+    5. Stores structured memories
+    6. Triggers evolution linking (Layer 2)
+    7. Provides intelligent recall (Layer 3)
     
     This is the central component that all other layers build upon.
     The kernel intentionally maintains a minimal surface area, delegating
@@ -112,6 +120,7 @@ class MnemosKernel:
         comparator: Evolution comparison module (Layer 2)
         summarizer: Temporal summarization module (Layer 2)
         recall_engine: Intelligent recall engine (Layer 3)
+        constraint_engine: Domain constraint engine (Layer 4)
         config: Kernel configuration
     """
     
@@ -123,7 +132,9 @@ class MnemosKernel:
         enable_evolution: bool = True,
         enable_recall: bool = True,
         recall_insights: bool = True,
-        recall_limit: int = 20
+        recall_limit: int = 20,
+        enable_constraints: bool = True,
+        constraints_fail_on_error: bool = False
     ):
         """
         Initialize the Mnemos kernel.
@@ -136,6 +147,8 @@ class MnemosKernel:
             enable_recall: Whether to enable Layer 3 recall engine
             recall_insights: Whether to generate insights during recall
             recall_limit: Default limit for recall results
+            enable_constraints: Whether to enable Layer 4 domain constraints
+            constraints_fail_on_error: Whether to fail on constraint errors
         """
         self.store = MemoryStore(storage_dir)
         self.classifier = IntentClassifier(
@@ -160,6 +173,15 @@ class MnemosKernel:
                 store=self.store  # Pass the shared store
             )
         
+        # Layer 4: Domain Constraints
+        self.enable_constraints = enable_constraints
+        if enable_constraints:
+            self.constraint_engine = ConstraintEngine(
+                storage_dir=storage_dir,
+                enabled=True,
+                fail_on_error=constraints_fail_on_error
+            )
+        
         self.config = {
             "storage_dir": storage_dir,
             "llm_enabled": enable_llm_classification,
@@ -167,7 +189,9 @@ class MnemosKernel:
             "evolution_enabled": enable_evolution,
             "recall_enabled": enable_recall,
             "recall_insights": recall_insights,
-            "recall_limit": recall_limit
+            "recall_limit": recall_limit,
+            "constraints_enabled": enable_constraints,
+            "constraints_fail_on_error": constraints_fail_on_error
         }
     
     def ingest(self, transcript_input: TranscriptInput) -> MemoryNode:
@@ -179,8 +203,9 @@ class MnemosKernel:
         1. Validates input
         2. Classifies intent
         3. Extracts entities (basic)
-        4. Creates and stores the memory node
-        5. Triggers evolution linking (Layer 2)
+        4. Validates against domain constraints (Layer 4)
+        5. Stores the memory node
+        6. Triggers evolution linking (Layer 2)
         
         Args:
             transcript_input: The transcript data from VoiceInk
@@ -210,12 +235,29 @@ class MnemosKernel:
         for entity in entities:
             memory.add_entity(entity)
         
-        # Step 4: Store the memory
+        # Step 4: Validate against domain constraints (Layer 4)
+        constraint_result = None
+        if self.enable_constraints:
+            can_proceed, constraint_result = self.constraint_engine.before_ingest(memory)
+            if not can_proceed:
+                raise ValueError(
+                    f"Memory failed constraint validation: {constraint_result.error_count} errors"
+                )
+        
+        # Step 5: Store the memory
         self.store.store(memory)
         
-        # Step 5: Trigger evolution linking (Layer 2)
+        # Step 6: Trigger evolution linking (Layer 2)
         if self.enable_evolution:
             self._process_evolution(memory)
+        
+        # Step 7: Post-ingest constraint processing (Layer 4)
+        if self.enable_constraints:
+            post_result = self.constraint_engine.after_ingest(memory)
+            if post_result and post_result.violation_count > 0:
+                # Log violations but don't fail
+                memory.metadata["constraint_warnings"] = post_result.violation_count
+                memory.metadata["constraint_result"] = post_result.to_dict()
         
         return memory
     
@@ -351,6 +393,88 @@ class MnemosKernel:
         
         return entities
     
+    # =========================================================================
+    # Constraint Management (Layer 4)
+    # =========================================================================
+    
+    def add_constraint(self, constraint: BaseConstraint) -> bool:
+        """
+        Add a domain constraint to the kernel.
+        
+        Args:
+            constraint: The constraint to add
+            
+        Returns:
+            True if constraint was added successfully
+        """
+        if not self.enable_constraints:
+            return False
+        return self.constraint_engine.register_constraint(constraint)
+    
+    def remove_constraint(self, name: str) -> bool:
+        """
+        Remove a constraint by name.
+        
+        Args:
+            name: Name of the constraint to remove
+            
+        Returns:
+            True if constraint was removed
+        """
+        if not self.enable_constraints:
+            return False
+        return self.constraint_engine.unregister_constraint(name)
+    
+    def validate_memory(self, memory_id: str) -> Optional[ConstraintEngineResult]:
+        """
+        Validate a stored memory against constraints.
+        
+        Args:
+            memory_id: ID of the memory to validate
+            
+        Returns:
+            ConstraintEngineResult or None if memory not found
+        """
+        if not self.enable_constraints:
+            return None
+        
+        memory = self.store.retrieve(memory_id)
+        if not memory:
+            return None
+        
+        return self.constraint_engine.validate_memory(memory)
+    
+    def get_constraint_status(self) -> Dict[str, Any]:
+        """
+        Get the status of domain constraints.
+        
+        Returns:
+            Dictionary with constraint status
+        """
+        if not self.enable_constraints:
+            return {
+                "enabled": False,
+                "message": "Constraint engine is disabled"
+            }
+        
+        return self.constraint_engine.get_engine_status()
+    
+    def enable_constraints(self) -> None:
+        """Enable the constraint engine."""
+        self.enable_constraints = True
+        if hasattr(self, 'constraint_engine'):
+            self.constraint_engine.enable()
+    
+    def disable_constraints(self) -> None:
+        """Disable the constraint engine."""
+        self.enable_constraints = False
+        if hasattr(self, 'constraint_engine'):
+            self.constraint_engine.disable()
+    
+    # =========================================================================
+    # Recall Methods (Layer 3)
+    # =========================================================================
+    
     def recall(
         self,
         query: str,
@@ -423,6 +547,10 @@ class MnemosKernel:
             List of memories in evolution order
         """
         return self.store.query_by_evolution(memory_id)
+    
+    # =========================================================================
+    # Memory Management Methods
+    # =========================================================================
     
     def get_memory(self, memory_id: str) -> Optional[MemoryNode]:
         """
@@ -526,6 +654,10 @@ class MnemosKernel:
                     })
         
         return conflicts
+    
+    # =========================================================================
+    # Summary Methods (Layer 2)
+    # =========================================================================
     
     def generate_summary(
         self,
@@ -648,6 +780,10 @@ class MnemosKernel:
             return []
         return self.summarizer.load_summaries(period=period, limit=limit)
     
+    # =========================================================================
+    # CRUD Operations
+    # =========================================================================
+    
     def update_memory(self, memory: MemoryNode) -> bool:
         """
         Update an existing memory.
@@ -685,9 +821,10 @@ class MnemosKernel:
         stats = {
             "storage": store_stats,
             "classifier": classifier_stats,
-            "kernel_version": "0.3.0",
+            "kernel_version": "0.4.0",
             "layer_2_enabled": self.enable_evolution,
-            "layer_3_enabled": self.enable_recall
+            "layer_3_enabled": self.enable_recall,
+            "layer_4_enabled": self.enable_constraints
         }
         
         # Add evolution stats if enabled
@@ -700,6 +837,10 @@ class MnemosKernel:
         # Add recall stats if enabled
         if self.enable_recall:
             stats["recall"] = self.recall_engine.get_stats()
+        
+        # Add constraint stats if enabled
+        if self.enable_constraints:
+            stats["constraints"] = self.constraint_engine.get_validation_stats()
         
         return stats
     

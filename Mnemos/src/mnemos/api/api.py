@@ -3,11 +3,12 @@ FastAPI Web Interface for Mnemos
 
 This module provides a REST API for interacting with the Mnemos kernel.
 The API enables external applications to ingest transcripts, query memories,
-and manage the memory system with Layer 2 Evolution Intelligence and
-Layer 3 Recall Engine support.
+and manage the memory system with Layer 2 Evolution Intelligence,
+Layer 3 Recall Engine, and Layer 4 Domain Constraints support.
 
 The API is designed to be minimal and focused on the core kernel operations,
-with additional endpoints for evolution intelligence and intelligent recall.
+with additional endpoints for evolution intelligence, intelligent recall,
+and domain constraint management.
 """
 
 from datetime import datetime
@@ -20,6 +21,7 @@ from ..kernel import MnemosKernel, TranscriptInput
 from ..kernel.memory_node import MemoryNode, MemoryIntent
 from ..evolution.summarizer import SummaryPeriod
 from ..recall import RecallResult
+from ..constraints import ConstraintResult, ConstraintType
 
 
 # Pydantic models for API request/response
@@ -118,6 +120,7 @@ class StatsResponse(BaseModel):
     storage_dir: str
     layer_2_enabled: bool = True
     layer_3_enabled: bool = True
+    layer_4_enabled: bool = False
 
 
 class MemoryLinkResponse(BaseModel):
@@ -189,11 +192,74 @@ class SummaryGenerateRequest(BaseModel):
     period: str = Field(default="weekly", description="Summary period type: daily, weekly, monthly")
 
 
+# ============================================================================
+# Constraint API Models (Layer 4)
+# ============================================================================
+
+class ConstraintResponse(BaseModel):
+    """Response model for constraint information."""
+    name: str
+    type: str
+    description: str
+    enabled: bool
+    version: str
+    
+    @classmethod
+    def from_constraint(cls, constraint) -> "ConstraintResponse":
+        """Create from constraint object."""
+        return cls(
+            name=constraint.name,
+            type=constraint.constraint_type.value,
+            description=constraint.description,
+            enabled=getattr(constraint, 'enabled', True),
+            version=getattr(constraint, 'version', '1.0.0')
+        )
+
+
+class ConstraintValidationResponse(BaseModel):
+    """Response model for constraint validation results."""
+    memory_id: str
+    overall_passed: bool
+    violation_count: int
+    warning_count: int
+    error_count: int
+    results: List[Dict[str, Any]]
+    recommendations: List[str]
+    
+    @classmethod
+    def from_result(cls, result) -> "ConstraintValidationResponse":
+        """Create from ConstraintEngineResult."""
+        return cls(
+            memory_id=result.memory_id,
+            overall_passed=result.overall_passed,
+            violation_count=result.violation_count,
+            warning_count=result.warning_count,
+            error_count=result.error_count,
+            results=[r.to_dict() for r in result.results],
+            recommendations=result.recommendations
+        )
+
+
+class ConstraintStatusResponse(BaseModel):
+    """Response model for constraint engine status."""
+    enabled: bool
+    fail_on_error: bool
+    constraints_count: int
+    constraints_by_type: Dict[str, int]
+    validation_stats: Dict[str, Any]
+
+
+class AddConstraintRequest(BaseModel):
+    """Request model for adding a constraint."""
+    constraint_type: str = Field(..., description="Type of constraint to add")
+    # Additional constraint-specific parameters would go here
+
+
 # Create FastAPI application
 app = FastAPI(
     title="Mnemos API",
-    description="Memory Kernel API for personal knowledge management with Evolution Intelligence and Intelligent Recall",
-    version="0.3.0"
+    description="Memory Kernel API for personal knowledge management with Evolution Intelligence, Intelligent Recall, and Domain Constraints",
+    version="0.4.0"
 )
 
 # Global kernel instance
@@ -214,6 +280,10 @@ async def startup_event():
     get_kernel()
 
 
+# ============================================================================
+# Core Memory Endpoints
+# ============================================================================
+
 @app.post("/ingest", response_model=MemoryResponse, status_code=201)
 async def ingest_transcript(request: TranscriptRequest):
     """
@@ -221,7 +291,8 @@ async def ingest_transcript(request: TranscriptRequest):
     
     This endpoint receives text from VoiceInk (or any other source),
     processes it through the memory kernel, and returns the created
-    memory node. Evolution linking is automatically triggered.
+    memory node. Evolution linking and constraint validation are
+    automatically triggered.
     """
     kernel = get_kernel()
     
@@ -467,6 +538,10 @@ async def get_conflicts():
     ]
 
 
+# ============================================================================
+# Evolution Endpoints (Layer 2)
+# ============================================================================
+
 @app.post("/evolution/summarize", response_model=SummaryResponse)
 async def generate_summary(request: SummaryGenerateRequest):
     """
@@ -550,6 +625,104 @@ async def get_weekly_summary(end_date: Optional[datetime] = Query(None, descript
     return SummaryResponse.from_summary(summary)
 
 
+# ============================================================================
+# Constraint Endpoints (Layer 4)
+# ============================================================================
+
+@app.get("/constraints", response_model=List[ConstraintResponse])
+async def list_constraints():
+    """
+    List all registered domain constraints.
+    
+    Returns information about all constraints currently registered
+    with the constraint engine.
+    """
+    kernel = get_kernel()
+    
+    if not kernel.enable_constraints:
+        return []
+    
+    constraints = kernel.constraint_engine.registry.get_all()
+    return [ConstraintResponse.from_constraint(c) for c in constraints]
+
+
+@app.get("/constraints/status", response_model=ConstraintStatusResponse)
+async def get_constraint_status():
+    """
+    Get the status of the constraint engine.
+    
+    Returns information about the constraint engine including:
+    - Whether it's enabled
+    - Number of registered constraints
+    - Validation statistics
+    """
+    kernel = get_kernel()
+    
+    if not kernel.enable_constraints:
+        raise HTTPException(status_code=400, detail="Constraint engine is not enabled")
+    
+    status = kernel.get_constraint_status()
+    
+    return ConstraintStatusResponse(
+        enabled=status.get("enabled", False),
+        fail_on_error=status.get("fail_on_error", False),
+        constraints_count=status.get("constraints_count", 0),
+        constraints_by_type=status.get("constraints_by_type", {}),
+        validation_stats=status.get("validation_stats", {})
+    )
+
+
+@app.post("/constraints/{memory_id}/validate", response_model=ConstraintValidationResponse)
+async def validate_memory(memory_id: str):
+    """
+    Validate a stored memory against domain constraints.
+    
+    This endpoint runs all registered constraints against a memory
+    and returns detailed validation results.
+    """
+    kernel = get_kernel()
+    
+    if not kernel.enable_constraints:
+        raise HTTPException(status_code=400, detail="Constraint engine is not enabled")
+    
+    result = kernel.validate_memory(memory_id)
+    
+    if result is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    
+    return ConstraintValidationResponse.from_result(result)
+
+
+@app.post("/constraints/enable")
+async def enable_constraints():
+    """
+    Enable the constraint engine.
+    
+    After enabling, all new memories will be validated against
+    registered constraints during ingestion.
+    """
+    kernel = get_kernel()
+    kernel.enable_constraints()
+    return {"message": "Constraint engine enabled"}
+
+
+@app.post("/constraints/disable")
+async def disable_constraints():
+    """
+    Disable the constraint engine.
+    
+    When disabled, constraints will not be applied during memory
+    ingestion. Existing constraints remain registered.
+    """
+    kernel = get_kernel()
+    kernel.disable_constraints()
+    return {"message": "Constraint engine disabled"}
+
+
+# ============================================================================
+# Utility Endpoints
+# ============================================================================
+
 @app.get("/recent", response_model=List[MemoryResponse])
 async def get_recent_memories(count: int = Query(10, ge=1, le=100)):
     """
@@ -563,7 +736,7 @@ async def get_recent_memories(count: int = Query(10, ge=1, le=100)):
 @app.get("/stats", response_model=StatsResponse)
 async def get_stats():
     """
-    Get system statistics including evolution and recall metrics.
+    Get system statistics including evolution, recall, and constraint metrics.
     """
     kernel = get_kernel()
     stats = kernel.get_stats()
@@ -574,7 +747,8 @@ async def get_stats():
         topic_count=stats["storage"]["topic_count"],
         storage_dir=stats["storage"]["storage_dir"],
         layer_2_enabled=stats.get("layer_2_enabled", True),
-        layer_3_enabled=stats.get("layer_3_enabled", True)
+        layer_3_enabled=stats.get("layer_3_enabled", True),
+        layer_4_enabled=stats.get("layer_4_enabled", False)
     )
 
 
@@ -619,9 +793,10 @@ async def root():
     
     return {
         "service": "Mnemos Memory Kernel",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "layer_2": "Evolution Intelligence enabled" if stats.get("layer_2_enabled") else "Evolution Intelligence disabled",
         "layer_3": "Recall Engine enabled" if stats.get("layer_3_enabled") else "Recall Engine disabled",
+        "layer_4": "Domain Constraints enabled" if stats.get("layer_4_enabled") else "Domain Constraints disabled",
         "endpoints": {
             "ingest": "POST /ingest",
             "recall": "POST /recall or GET /recall",
@@ -636,6 +811,11 @@ async def root():
             "summaries": "GET /evolution/summaries",
             "daily_summary": "GET /evolution/daily-summary",
             "weekly_summary": "GET /evolution/weekly-summary",
+            "constraints": "GET /constraints",
+            "constraints_status": "GET /constraints/status",
+            "validate_memory": "POST /constraints/{id}/validate",
+            "enable_constraints": "POST /constraints/enable",
+            "disable_constraints": "POST /constraints/disable",
             "recent": "GET /recent",
             "stats": "GET /stats",
             "health": "GET /health"
