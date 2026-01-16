@@ -67,10 +67,12 @@ class IntentClassifier:
         """Initialize the default pattern rules for classification."""
         
         # Decision patterns - explicit commitments and choices
+        # Use (^|[\s\.\,\;\:\!\?]) to match start of string or before common punctuation
+        # The (?=[\s\.\,\;\:\\!\?\$]|$) lookahead ensures we match complete phrases
         self.rules.extend([
-            PatternRule(r'\b(i will|i am going to|we will|decided to|decision:|going to)\b', 
+            PatternRule(r'(^|[\s\.\,\;\:\!\?])(i will|i am going to|we will|decided to|decision:|going to)(?=[\s\.\,\;\:\\!\?\$]|$)', 
                        [MemoryIntent.DECISION]),
-            PatternRule(r'\b(remember to|don\'t forget|make sure to|ensure that)\b', 
+            PatternRule(r'(^|[\s\.\,\;\:\!\?])(remember to|don\'t forget|make sure to|ensure that)(?=[\s\.\,\;\:\!\?]|$)', 
                        [MemoryIntent.ACTION]),
         ])
         
@@ -118,6 +120,9 @@ class IntentClassifier:
             PatternRule(r'\b(that didn\'t work|i was wrong|i should have)\b', 
                        [MemoryIntent.REFLECTION]),
             PatternRule(r'\b(i regret|i appreciate|i\'m grateful for)\b', 
+                       [MemoryIntent.REFLECTION]),
+            # Keyword-based reflection for explicit meta-commentary
+            PatternRule(r'(^|[\s\.\,\;\:\!\?])(reflection:)(?=[\s\.\,\;\:\\!\?\$]|$)', 
                        [MemoryIntent.REFLECTION]),
         ])
     
