@@ -5,23 +5,25 @@ The kernel is the central orchestrator of the Mnemos system. It coordinates
 the flow of data through the memory processing pipeline, from raw transcript
 ingestion to memory storage and retrieval.
 
-This module implements the core Layer 1 functionality of the Mnemos architecture:
+This module implements Layer 1 (Memory Kernel) and Layer 2 (Evolution Intelligence):
 - Memory ingestion from VoiceInk transcripts
 - Intent classification
-- Semantic topic processing
+- Entity and topic extraction
+- Evolution linking and conflict detection
+- Temporal summarization
 - Memory storage and retrieval
-
-The kernel is designed to be minimal and focused, with additional capabilities
-layered on through the plugin architecture defined in Layer 4.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import uuid
 
 from .memory_node import MemoryNode, MemoryIntent, Entity, EntityType
 from ..classifier.intent_classifier import IntentClassifier
 from ..storage.memory_store import MemoryStore
+from ..evolution.linker import EvolutionLinker, MemoryLink, LinkType
+from ..evolution.comparator import EvolutionComparator, RelationshipResult, RelationshipType
+from ..evolution.summarizer import TemporalSummarizer, TemporalSummary, SummaryPeriod
 
 
 class TranscriptInput:
@@ -93,7 +95,8 @@ class MnemosKernel:
     2. Classifies memory intent
     3. Extracts entities and topics
     4. Stores structured memories
-    5. Provides recall capabilities
+    5. Triggers evolution linking (Layer 2)
+    6. Provides recall capabilities
     
     This is the central component that all other layers build upon.
     The kernel intentionally maintains a minimal surface area, delegating
@@ -102,6 +105,9 @@ class MnemosKernel:
     Attributes:
         store: Memory storage backend
         classifier: Intent classification module
+        linker: Evolution linking module
+        comparator: Evolution comparison module
+        summarizer: Temporal summarization module
         config: Kernel configuration
     """
     
@@ -109,7 +115,8 @@ class MnemosKernel:
         self,
         storage_dir: str = "./data",
         enable_llm_classification: bool = False,
-        llm_provider: Optional[str] = None
+        llm_provider: Optional[str] = None,
+        enable_evolution: bool = True
     ):
         """
         Initialize the Mnemos kernel.
@@ -118,16 +125,26 @@ class MnemosKernel:
             storage_dir: Directory for memory storage
             enable_llm_classification: Whether to use LLM fallback for intent
             llm_provider: Optional LLM provider name
+            enable_evolution: Whether to enable Layer 2 evolution intelligence
         """
         self.store = MemoryStore(storage_dir)
         self.classifier = IntentClassifier(
             use_llm=enable_llm_classification,
             llm_provider=llm_provider
         )
+        
+        # Layer 2: Evolution Intelligence
+        self.enable_evolution = enable_evolution
+        if enable_evolution:
+            self.linker = EvolutionLinker(storage_dir=storage_dir)
+            self.comparator = EvolutionComparator(use_llm=False)
+            self.summarizer = TemporalSummarizer(storage_dir=storage_dir)
+        
         self.config = {
             "storage_dir": storage_dir,
             "llm_enabled": enable_llm_classification,
-            "llm_provider": llm_provider
+            "llm_provider": llm_provider,
+            "evolution_enabled": enable_evolution
         }
     
     def ingest(self, transcript_input: TranscriptInput) -> MemoryNode:
@@ -140,6 +157,7 @@ class MnemosKernel:
         2. Classifies intent
         3. Extracts entities (basic)
         4. Creates and stores the memory node
+        5. Triggers evolution linking (Layer 2)
         
         Args:
             transcript_input: The transcript data from VoiceInk
@@ -172,7 +190,67 @@ class MnemosKernel:
         # Step 4: Store the memory
         self.store.store(memory)
         
+        # Step 5: Trigger evolution linking (Layer 2)
+        if self.enable_evolution:
+            self._process_evolution(memory)
+        
         return memory
+    
+    def _process_evolution(self, memory: MemoryNode) -> None:
+        """
+        Process evolution intelligence for a new memory.
+        
+        This method:
+        1. Finds related past memories
+        2. Compares relationships
+        3. Creates evolution links
+        
+        Args:
+            memory: The newly created memory
+        """
+        # Get all existing memories
+        all_memories = list(self.store.iter_all())
+        
+        if not all_memories:
+            return
+        
+        # Find related memories
+        related = self.linker.find_related_memories(memory, all_memories)
+        
+        for related_memory, similarity in related:
+            # Compare memories to determine relationship
+            result = self.comparator.compare(
+                source_text=memory.raw_text,
+                target_text=related_memory.raw_text,
+                source_id=memory.id,
+                target_id=related_memory.id,
+                source_intent=memory.intent.value,
+                target_intent=related_memory.intent.value
+            )
+            
+            # Determine link type from relationship
+            link_type = self._relationship_to_link_type(result.relationship)
+            
+            # Create the evolution link
+            self.linker.create_link(
+                source_memory=memory,
+                target_memory=related_memory,
+                link_type=link_type,
+                strength=similarity,
+                context=result.explanation
+            )
+    
+    def _relationship_to_link_type(self, relationship: RelationshipType) -> LinkType:
+        """Convert RelationshipType to LinkType."""
+        mapping = {
+            RelationshipType.REPETITION: LinkType.REPEATS,
+            RelationshipType.CONTRADICTION: LinkType.CONTRADICTS,
+            RelationshipType.EVOLUTION: LinkType.UPDATES,
+            RelationshipType.SUPPORT: LinkType.SUPPORTS,
+            RelationshipType.QUESTIONING: LinkType.QUESTIONS,
+            RelationshipType.UNRELATED: LinkType.RELATES_TO,
+        }
+        return mapping.get(relationship, LinkType.RELATES_TO)
     
     def _extract_entities(self, text: str) -> List[Entity]:
         """
@@ -328,6 +406,173 @@ class MnemosKernel:
         """
         return self.store.retrieve(memory_id)
     
+    def get_memory_links(self, memory_id: str) -> List[MemoryLink]:
+        """
+        Get evolution links for a memory.
+        
+        Args:
+            memory_id: The memory ID to get links for
+            
+        Returns:
+            List of MemoryLinks where this memory is the source
+        """
+        if not self.enable_evolution:
+            return []
+        return self.linker.get_links_for_memory(memory_id)
+    
+    def get_conflicts(self) -> List[Dict[str, Any]]:
+        """
+        Get all detected contradictions.
+        
+        Returns:
+            List of conflict information dictionaries
+        """
+        if not self.enable_evolution:
+            return []
+        
+        conflicts = []
+        links = self.linker.get_all_links()
+        
+        for link in links:
+            if link.link_type == LinkType.CONTRADICTS:
+                source = self.store.retrieve(link.source_id)
+                target = self.store.retrieve(link.target_id)
+                
+                if source and target:
+                    conflicts.append({
+                        "source_id": link.source_id,
+                        "target_id": link.target_id,
+                        "source_text": source.raw_text,
+                        "target_text": target.raw_text,
+                        "source_timestamp": source.timestamp.isoformat(),
+                        "target_timestamp": target.timestamp.isoformat(),
+                        "strength": link.strength,
+                        "context": link.context
+                    })
+        
+        return conflicts
+    
+    def generate_summary(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        period: SummaryPeriod = SummaryPeriod.WEEKLY
+    ) -> TemporalSummary:
+        """
+        Generate a temporal summary.
+        
+        Args:
+            start_time: Start of the summary period
+            end_time: End of the summary period
+            period: Type of summary to generate
+            
+        Returns:
+            TemporalSummary with synthesized content
+        """
+        if not self.enable_evolution:
+            return TemporalSummary(
+                period=period,
+                start_date=start_time,
+                end_date=end_time,
+                content="Evolution intelligence is disabled."
+            )
+        
+        # Get memories in the time range
+        memories = self.store.query_by_time_range(start_time, end_time)
+        
+        # Generate summary
+        summary = self.summarizer.generate_summary(
+            memories=memories,
+            period=period,
+            start_date=start_time,
+            end_date=end_time
+        )
+        
+        # Save the summary
+        self.summarizer.save_summary(summary)
+        
+        return summary
+    
+    def generate_daily_summary(self, date: Optional[datetime] = None) -> TemporalSummary:
+        """
+        Generate a daily summary.
+        
+        Args:
+            date: The date to summarize (defaults to today)
+            
+        Returns:
+            Daily TemporalSummary
+        """
+        if not self.enable_evolution:
+            target_date = (date or datetime.utcnow()).date()
+            return TemporalSummary(
+                period=SummaryPeriod.DAILY,
+                start_date=datetime.combine(target_date, datetime.min.time()),
+                end_date=datetime.combine(target_date, datetime.max.time()),
+                content="Evolution intelligence is disabled."
+            )
+        
+        # Get memories from the day
+        target_date = (date or datetime.utcnow()).date()
+        start_time = datetime.combine(target_date, datetime.min.time())
+        end_time = datetime.combine(target_date, datetime.max.time())
+        memories = self.store.query_by_time_range(start_time, end_time)
+        
+        # Generate and save
+        summary = self.summarizer.generate_daily_summary(memories, target_date)
+        self.summarizer.save_summary(summary)
+        
+        return summary
+    
+    def generate_weekly_summary(self, end_date: Optional[datetime] = None) -> TemporalSummary:
+        """
+        Generate a weekly summary.
+        
+        Args:
+            end_date: End of the week (defaults to today)
+            
+        Returns:
+            Weekly TemporalSummary
+        """
+        if not self.enable_evolution:
+            end = end_date or datetime.utcnow()
+            return TemporalSummary(
+                period=SummaryPeriod.WEEKLY,
+                start_date=end - timedelta(days=7),
+                end_date=end,
+                content="Evolution intelligence is disabled."
+            )
+        
+        # Get memories from the week
+        end = end_date or datetime.utcnow()
+        start_time = end - timedelta(days=7)
+        memories = self.store.query_by_time_range(start_time, end)
+        
+        # Generate and save
+        summary = self.summarizer.generate_weekly_summary(memories, end)
+        self.summarizer.save_summary(summary)
+        
+        return summary
+    
+    def get_summaries(
+        self,
+        period: Optional[SummaryPeriod] = None,
+        limit: int = 10
+    ) -> List[TemporalSummary]:
+        """
+        Get saved summaries.
+        
+        Args:
+            period: Optional filter by period type
+            limit: Maximum number of summaries to return
+            
+        Returns:
+            List of TemporalSummaries
+        """
+        if not self.enable_evolution:
+            return []
+        return self.summarizer.load_summaries(period=period, limit=limit)
+    
     def update_memory(self, memory: MemoryNode) -> bool:
         """
         Update an existing memory.
@@ -362,11 +607,21 @@ class MnemosKernel:
         store_stats = self.store.get_stats()
         classifier_stats = self.classifier.get_classification_stats()
         
-        return {
+        stats = {
             "storage": store_stats,
             "classifier": classifier_stats,
-            "kernel_version": "0.1.0"
+            "kernel_version": "0.2.0",
+            "layer_2_enabled": self.enable_evolution
         }
+        
+        # Add evolution stats if enabled
+        if self.enable_evolution:
+            stats["evolution"] = {
+                "links": self.linker.get_link_stats(),
+                "summaries": self.summarizer.get_summary_stats()
+            }
+        
+        return stats
     
     def get_recent_memories(self, count: int = 10) -> List[MemoryNode]:
         """
@@ -382,7 +637,7 @@ class MnemosKernel:
     
     def clear_all(self) -> bool:
         """
-        Clear all stored memories.
+        Clear all stored memories and evolution data.
         
         This is a destructive operation that removes all data.
         Use with caution.
@@ -397,6 +652,11 @@ class MnemosKernel:
             self.store.storage_dir.mkdir(parents=True, exist_ok=True)
             self.store.memories_dir.mkdir(parents=True, exist_ok=True)
             self.store._load_indexes()
+            
+            # Clear evolution data
+            if self.enable_evolution:
+                self.linker.clear_all_links()
+            
             return True
         
         return False
