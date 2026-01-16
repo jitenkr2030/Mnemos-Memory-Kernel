@@ -10,6 +10,8 @@ Importance scoring considers:
 - Temporal factors (recent memories, time-sensitive content)
 - Content characteristics (length, specificity)
 - Evolution context (memories that are part of evolution chains)
+- Memory reinforcement (frequently accessed memories get boosted)
+- Memory decay (unused memories gradually lose importance)
 """
 
 from dataclasses import dataclass
@@ -35,6 +37,8 @@ class ImportanceScore:
         recency_score: Score from temporal factors
         content_score: Score from content characteristics
         evolution_score: Score from evolution context
+        reinforcement_score: Score from memory reinforcement (access patterns)
+        decay_score: Score from memory decay (time since last access)
         factors: Breakdown of contributing factors
     """
     total: float
@@ -43,6 +47,8 @@ class ImportanceScore:
     recency_score: float
     content_score: float
     evolution_score: float
+    reinforcement_score: float  # NEW: Score from access patterns
+    decay_score: float  # NEW: Score from time decay
     factors: Dict[str, float]
 
 
@@ -61,11 +67,13 @@ class ImportanceScorer:
     
     # Default weights for each scoring factor
     DEFAULT_WEIGHTS = {
-        "intent": 0.30,       # Intent type is most important
-        "entity": 0.25,       # Entity mentions indicate specificity
-        "recency": 0.20,      # Recent memories are more relevant
+        "intent": 0.25,       # Intent type is important
+        "entity": 0.20,       # Entity mentions indicate specificity
+        "recency": 0.15,      # Recent memories are more relevant
         "content": 0.15,      # Content characteristics matter
         "evolution": 0.10,    # Evolution context adds value
+        "reinforcement": 0.10,  # Memory reinforcement from access patterns
+        "decay": 0.05,         # Memory decay from disuse
     }
     
     # Intent importance ranking (higher = more important)
@@ -104,7 +112,8 @@ class ImportanceScorer:
     def __init__(
         self,
         weights: Optional[Dict[str, float]] = None,
-        recent_decay_days: int = 30
+        recent_decay_days: int = 30,
+        memory_decay_rate: float = 0.01
     ):
         """
         Initialize the importance scorer.
@@ -112,9 +121,11 @@ class ImportanceScorer:
         Args:
             weights: Optional custom weights for scoring factors
             recent_decay_days: Days after which recency impact decreases
+            memory_decay_rate: Daily decay rate for unused memories (default 1%)
         """
         self.weights = weights or self.DEFAULT_WEIGHTS.copy()
         self.recent_decay_days = recent_decay_days
+        self.memory_decay_rate = memory_decay_rate
     
     def score(self, memory: MemoryNode) -> ImportanceScore:
         """
@@ -135,6 +146,8 @@ class ImportanceScorer:
         recency_score = self._score_recency(memory)
         content_score = self._score_content(memory)
         evolution_score = self._score_evolution(memory)
+        reinforcement_score = self._score_reinforcement(memory)
+        decay_score = self._score_decay(memory)
         
         # Calculate weighted total
         total = (
@@ -142,7 +155,9 @@ class ImportanceScorer:
             entity_score * self.weights["entity"] +
             recency_score * self.weights["recency"] +
             content_score * self.weights["content"] +
-            evolution_score * self.weights["evolution"]
+            evolution_score * self.weights["evolution"] +
+            reinforcement_score * self.weights["reinforcement"] +
+            decay_score * self.weights["decay"]
         )
         
         # Normalize to 0-1 range
@@ -155,11 +170,15 @@ class ImportanceScorer:
             "recency": recency_score,
             "content": content_score,
             "evolution": evolution_score,
+            "reinforcement": reinforcement_score,
+            "decay": decay_score,
             "intent_weight": self.weights["intent"],
             "entity_weight": self.weights["entity"],
             "recency_weight": self.weights["recency"],
             "content_weight": self.weights["content"],
             "evolution_weight": self.weights["evolution"],
+            "reinforcement_weight": self.weights["reinforcement"],
+            "decay_weight": self.weights["decay"],
         }
         
         return ImportanceScore(
@@ -169,6 +188,8 @@ class ImportanceScorer:
             recency_score=recency_score,
             content_score=content_score,
             evolution_score=evolution_score,
+            reinforcement_score=reinforcement_score,
+            decay_score=decay_score,
             factors=factors
         )
     
@@ -307,6 +328,53 @@ class ImportanceScorer:
             return 0.5  # Has some connection
         else:
             return 0.3  # Isolated memory
+    
+    def _score_reinforcement(self, memory: MemoryNode) -> float:
+        """
+        Score based on memory reinforcement from access patterns.
+        
+        Memories that are frequently accessed are considered more
+        important and get a boost in the scoring algorithm. This
+        simulates how repeated recall strengthens memory traces.
+        
+        The reinforcement score uses logarithmic scaling so that
+        additional accesses have diminishing returns, preventing
+        heavily-accessed memories from completely dominating.
+        
+        Args:
+            memory: The memory node
+            
+        Returns:
+            Score from 0.0 to 1.0 based on access patterns
+        """
+        if memory.access_count == 0:
+            return 0.0  # Never accessed - no reinforcement yet
+        
+        # Use the memory's built-in reinforcement score (logarithmic)
+        # This gives diminishing returns for additional accesses
+        return memory.get_reinforcement_score()
+    
+    def _score_decay(self, memory: MemoryNode) -> float:
+        """
+        Score based on memory decay from disuse.
+        
+        Memories that haven't been accessed for a while may decay
+        in importance. This factor helps surface more recently
+        accessed/used memories in recall results.
+        
+        The decay factor is calculated based on time since last access,
+        with a configurable daily decay rate. Memories that were
+        never accessed don't decay (they maintain full importance).
+        
+        Args:
+            memory: The memory node
+            
+        Returns:
+            Score from 0.1 to 1.0 (1.0 = no decay, lower = more decay)
+        """
+        # Use the memory's built-in decay factor
+        # This returns 1.0 for never-accessed memories and decays over time
+        return memory.get_decay_factor(decay_rate=self.memory_decay_rate)
     
     def batch_score(self, memories: List[MemoryNode]) -> Dict[str, ImportanceScore]:
         """

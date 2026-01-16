@@ -126,8 +126,10 @@ class TestImportanceScorer:
         
         score = self.scorer.score(memory)
         
-        assert score.total > 0.5
+        # Actions should have high intent score
         assert score.intent_score == 0.9  # ACTION has high weight
+        # Total should be reasonably high (accounting for weight redistribution)
+        assert score.total > 0.4
     
     def test_score_idea_medium_importance(self):
         """Test that ideas get medium importance scores."""
@@ -213,6 +215,176 @@ class TestImportanceScorer:
         assert len(top) == 2
         # First should be highest scoring
         assert top[0][0].intent == MemoryIntent.DECISION
+
+
+class TestImportanceScorerReinforcement:
+    """Tests for importance scorer reinforcement functionality."""
+    
+    def setup_method(self):
+        """Set up scorer for each test."""
+        self.scorer = ImportanceScorer()
+    
+    def test_reinforcement_score_never_accessed(self):
+        """Test that never-accessed memories get zero reinforcement score."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        score = self.scorer.score(memory)
+        
+        assert score.reinforcement_score == 0.0
+        assert score.decay_score == 1.0  # Never accessed = no decay
+    
+    def test_reinforcement_score_after_access(self):
+        """Test reinforcement score increases after memory access."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        memory.record_access()
+        
+        score = self.scorer.score(memory)
+        
+        assert score.reinforcement_score > 0
+        assert score.reinforcement_score <= 1.0
+    
+    def test_reinforcement_score_multiple_accesses(self):
+        """Test reinforcement score scales with access count."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        # Access once
+        memory.record_access()
+        score_once = self.scorer.score(memory)
+        
+        # Access many more times
+        for _ in range(50):
+            memory.record_access()
+        score_many = self.scorer.score(memory)
+        
+        # More accesses should mean higher reinforcement score
+        assert score_many.reinforcement_score > score_once.reinforcement_score
+        assert score_many.reinforcement_score <= 1.0
+    
+    def test_decay_score_recent_access(self):
+        """Test that recently accessed memories have no decay."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        memory.record_access()
+        
+        score = self.scorer.score(memory)
+        
+        # Recently accessed = minimal decay
+        assert score.decay_score > 0.99
+    
+    def test_decay_score_old_access(self):
+        """Test that old memories have appropriate decay."""
+        from datetime import timedelta
+        
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        # Simulate access 30 days ago
+        memory.last_accessed_at = datetime.utcnow() - timedelta(days=30)
+        memory.access_count = 5
+        
+        score = self.scorer.score(memory)
+        
+        # Should have some decay (1.0 - 0.01 * 30 = 0.7, but min 0.1)
+        assert score.decay_score < 1.0
+        assert score.decay_score >= 0.1
+    
+    def test_decay_score_never_accessed(self):
+        """Test that never-accessed memories don't decay."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        score = self.scorer.score(memory)
+        
+        assert score.decay_score == 1.0
+    
+    def test_total_score_includes_reinforcement(self):
+        """Test that total score incorporates reinforcement factor."""
+        memory = MemoryNode(
+            raw_text="Test decision memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.DECISION
+        )
+        
+        # Get base score (no reinforcement)
+        base_score = self.scorer.score(memory)
+        base_total = base_score.total
+        
+        # Access memory many times
+        for _ in range(100):
+            memory.record_access()
+        
+        # Get score with reinforcement
+        reinforced_score = self.scorer.score(memory)
+        reinforced_total = reinforced_score.total
+        
+        # Reinforced should be at least as high (or higher due to decay reset)
+        assert reinforced_total >= base_total - 0.01  # Allow small floating point diff
+    
+    def test_custom_decay_rate(self):
+        """Test that custom decay rate is respected."""
+        fast_decay_scorer = ImportanceScorer(memory_decay_rate=0.05)  # 5% per day
+        slow_decay_scorer = ImportanceScorer(memory_decay_rate=0.001)  # 0.1% per day
+        
+        from datetime import timedelta
+        
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        # Simulate access 10 days ago
+        memory.last_accessed_at = datetime.utcnow() - timedelta(days=10)
+        memory.access_count = 5
+        
+        fast_score = fast_decay_scorer.score(memory)
+        slow_score = slow_decay_scorer.score(memory)
+        
+        # Fast decay should result in lower decay score
+        assert fast_score.decay_score < slow_score.decay_score
+    
+    def test_importance_score_has_all_factors(self):
+        """Test that ImportanceScore includes all factor breakdowns."""
+        memory = MemoryNode(
+            raw_text="Test memory with entities",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        memory.add_entity(Entity(type=EntityType.PERSON, value="John"))
+        
+        score = self.scorer.score(memory)
+        
+        # Check all expected factors are present
+        assert hasattr(score, 'intent_score')
+        assert hasattr(score, 'entity_score')
+        assert hasattr(score, 'recency_score')
+        assert hasattr(score, 'content_score')
+        assert hasattr(score, 'evolution_score')
+        assert hasattr(score, 'reinforcement_score')
+        assert hasattr(score, 'decay_score')
+        
+        # Check factors dict contains all weights
+        assert 'reinforcement_weight' in score.factors
+        assert 'decay_weight' in score.factors
 
 
 class TestInsightGenerator:
@@ -540,6 +712,49 @@ class TestRecallEngine:
         assert "total_memories" in stats
         assert "storage_dir" in stats
         assert "insights_enabled" in stats
+    
+    def test_recall_records_access(self):
+        """Test that recall records access for returned memories."""
+        # Add a memory
+        self.kernel.ingest(TranscriptInput(text="Important decision about pricing", timestamp=datetime.utcnow()))
+        
+        # Recall the memory
+        result = self.kernel.recall(query="pricing", record_access=True)
+        
+        # Get the memory from storage and check access was recorded
+        memories = list(self.kernel.store.iter_all())
+        if memories:
+            accessed_memory = memories[0]
+            assert accessed_memory.access_count >= 1
+            assert accessed_memory.last_accessed_at is not None
+    
+    def test_recall_no_access_recording(self):
+        """Test that recall can skip access recording."""
+        # Add a memory
+        self.kernel.ingest(TranscriptInput(text="Test memory about testing", timestamp=datetime.utcnow()))
+        
+        # Recall without recording access
+        result = self.kernel.recall(query="testing", record_access=False)
+        
+        # Get the memory and verify access was NOT recorded
+        memories = list(self.kernel.store.iter_all())
+        if memories:
+            # Access count should still be 0 or whatever it was before
+            assert memories[0].access_count == 0
+    
+    def test_multiple_recalls_increase_access_count(self):
+        """Test that multiple recalls increase access count."""
+        # Add a memory
+        self.kernel.ingest(TranscriptInput(text="Key decision about the project", timestamp=datetime.utcnow()))
+        
+        # Recall multiple times
+        for _ in range(3):
+            self.kernel.recall(query="project", record_access=True)
+        
+        # Check access count was incremented
+        memories = list(self.kernel.store.iter_all())
+        if memories:
+            assert memories[0].access_count == 3
 
 
 class TestMnemosKernelRecall:

@@ -129,7 +129,8 @@ class RecallEngine:
         query: str,
         limit: Optional[int] = None,
         generate_insights: Optional[bool] = None,
-        include_scores: bool = True
+        include_scores: bool = True,
+        record_access: bool = True
     ) -> RecallResult:
         """
         Execute a recall query and return results.
@@ -139,13 +140,15 @@ class RecallEngine:
         2. Resolves memories matching the query criteria
         3. Scores memories by importance
         4. Optionally generates insights
-        5. Returns ranked results
+        5. Records access for returned memories (for reinforcement)
+        6. Returns ranked results
         
         Args:
             query: Natural language query string
             limit: Maximum results to return (uses default if not specified)
             generate_insights: Whether to generate insights (uses enable_insights if not specified)
             include_scores: Whether to include importance scores
+            record_access: Whether to record access for returned memories (enables reinforcement)
             
         Returns:
             RecallResult with memories, scores, and optional insights
@@ -179,6 +182,13 @@ class RecallEngine:
         # Apply limit
         memories = memories[:parsed.limit]
         
+        # Record access for returned memories (if enabled)
+        if record_access:
+            for memory in memories:
+                memory.record_access()
+                # Optionally persist the updated access count
+                self._persist_memory_access(memory)
+        
         # Generate insights if enabled
         insights = None
         if generate_insights if generate_insights is not None else self.enable_insights:
@@ -195,6 +205,23 @@ class RecallEngine:
             total_found=total_found,
             execution_time_ms=execution_time
         )
+    
+    def _persist_memory_access(self, memory: MemoryNode) -> None:
+        """
+        Persist the updated memory access information to storage.
+        
+        This ensures that access counts and timestamps are saved,
+        enabling reinforcement tracking across sessions.
+        
+        Args:
+            memory: The memory node with updated access info
+        """
+        try:
+            self.store.update(memory)
+        except Exception:
+            # Silently fail if persistence fails - access tracking
+            # should not break the recall operation
+            pass
     
     def _resolve_query(self, parsed: ParsedQuery) -> List[MemoryNode]:
         """
@@ -365,14 +392,14 @@ class RecallEngine:
         elif sort_by == "importance":
             return sorted(
                 memories,
-                key=lambda m: scores.get(m.id, ImportanceScore(0, 0, 0, 0, 0, 0, {})).total,
+                key=lambda m: scores.get(m.id, ImportanceScore(0, 0, 0, 0, 0, 0, 0, 0, {})).total,
                 reverse=True
             )
         else:  # relevance or default
             # Use importance as proxy for relevance
             return sorted(
                 memories,
-                key=lambda m: scores.get(m.id, ImportanceScore(0, 0, 0, 0, 0, 0, {})).total,
+                key=lambda m: scores.get(m.id, ImportanceScore(0, 0, 0, 0, 0, 0, 0, 0, {})).total,
                 reverse=True
             )
     

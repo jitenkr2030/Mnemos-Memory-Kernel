@@ -5,7 +5,7 @@
 **A memory kernel that evolves. It does not merely store data—it understands how knowledge changes over time.**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-142%20passing-green.svg)](https://github.com/mnemos-project/mnemos)
+[![Tests](https://img.shields.io/badge/tests-182%20passing-green.svg)](https://github.com/mnemos-project/mnemos)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
@@ -89,10 +89,13 @@ The fundamental atomic unit of Mnemos. Every captured thought becomes a MemoryNo
 | `timestamp` | datetime | When this memory was captured |
 | `raw_text` | string | The verbatim transcript content |
 | `intent` | enum | IDEA, DECISION, QUESTION, REFLECTION, ACTION |
+| `epistemic_state` | enum | FACT, BELIEF, DECISION, REFLECTION (knowledge nature) |
 | `topics` | list[string] | Semantic cluster identifiers |
 | `entities` | list[Entity] | Extracted named elements (people, numbers, dates) |
 | `confidence` | float | Classification certainty (0.0-1.0) |
 | `evolution_ref` | list[UUID] | Links to related past memories |
+| `access_count` | int | Number of times this memory has been recalled |
+| `last_accessed_at` | datetime | Timestamp of last recall (for reinforcement tracking) |
 
 ### Intent Classification
 
@@ -103,6 +106,20 @@ Every memory must have a clear purpose. Mnemos classifies utterances into five i
 - **QUESTION**: Inquiries or information gaps ("How do I implement this feature?")
 - **REFLECTION**: Retrospective analysis ("I realized that my initial approach was wrong")
 - **ACTION**: Tasks and follow-ups ("Remember to call John tomorrow")
+
+### Epistemic States
+
+Mnemos distinguishes between different types of knowledge claims:
+
+- **FACT**: Objective, verifiable truth or observation ("The meeting is at 3pm")
+- **BELIEF**: Subjective or probabilistic assertion ("I think the stock will go up")
+- **DECISION**: Committed choice or commitment ("We chose PostgreSQL")
+- **REFLECTION**: Meta-commentary on other memories ("I was wrong about X")
+
+Epistemic states are orthogonal to intent:
+- A FACT can be an IDEA, QUESTION, or REFLECTION
+- A BELIEF typically manifests as an IDEA or REFLECTION
+- A DECISION intent always has DECISION epistemic state
 
 ### Evolution Intelligence (Layer 2)
 
@@ -378,13 +395,15 @@ result = kernel.recall("What was I working on last week?")
 
 ### Importance Scoring
 
-Every recalled memory includes an importance score based on:
+Every recalled memory includes an importance score based on multiple factors:
 
 - **Intent Type**: Decisions and actions score higher than ideas
 - **Entity Mentions**: Memories with dates, numbers, and specific entities rank higher
 - **Recency**: Recent memories are prioritized
 - **Content Characteristics**: Specific language (urgency, amounts) increases score
 - **Evolution Context**: Memories that are part of evolution chains are valued higher
+- **Memory Reinforcement**: Frequently recalled memories get a boost (simulates memory strengthening)
+- **Memory Decay**: Long-unused memories gradually lose importance (prevents stale content dominance)
 
 ```python
 result = kernel.recall("pricing decisions")
@@ -395,6 +414,71 @@ for memory in result.memories:
     print(f"  Total Score: {score.total:.2f}")
     print(f"  Intent Score: {score.intent_score:.2f}")
     print(f"  Recency Score: {score.recency_score:.2f}")
+    print(f"  Reinforcement Score: {score.reinforcement_score:.2f}")
+    print(f"  Decay Score: {score.decay_score:.2f}")
+```
+
+### Memory Reinforcement
+
+When memories are recalled, they are automatically reinforced:
+
+```python
+# First recall - low reinforcement
+result = kernel.recall("important decision")
+# Access count: 1, reinforcement_score: ~0.1
+
+# Recall again - reinforcement increases
+result = kernel.recall("important decision")
+# Access count: 2, reinforcement_score: ~0.2
+
+# Recall many times - logarithmic scaling (diminishing returns)
+for _ in range(50):
+    kernel.recall("important decision")
+# Access count: 52, reinforcement_score: ~0.5 (capped at 1.0)
+```
+
+The reinforcement score uses logarithmic scaling, so each additional recall has diminishing returns. This prevents heavily-accessed memories from completely dominating recall results while still reflecting genuine importance.
+
+### Memory Decay
+
+Memories that haven't been accessed for a while gradually lose importance:
+
+```python
+from datetime import datetime, timedelta
+
+# Recently accessed memory - no decay
+memory.last_accessed_at = datetime.utcnow()
+memory.get_decay_factor()  # Returns ~1.0
+
+# Memory accessed 30 days ago with default 1% daily decay
+memory.last_accessed_at = datetime.utcnow() - timedelta(days=30)
+memory.get_decay_factor(decay_rate=0.01)  # Returns ~0.7
+
+# Memory accessed 100 days ago
+memory.last_accessed_at = datetime.utcnow() - timedelta(days=100)
+memory.get_decay_factor(decay_rate=0.01)  # Returns 0.1 (minimum floor)
+```
+
+The decay has a minimum floor of 0.1, ensuring even long-unused memories remain discoverable. You can configure the decay rate when creating the ImportanceScorer:
+
+```python
+from mnemos.recall.importance_scorer import ImportanceScorer
+
+# Custom decay rate (2% per day)
+scorer = ImportanceScorer(memory_decay_rate=0.02)
+
+# Slower decay (0.5% per day) for more persistent memories
+scorer = ImportanceScorer(memory_decay_rate=0.005)
+```
+
+Access recording is enabled by default during recall but can be disabled:
+
+```python
+# Enable access recording (default)
+result = kernel.recall("my decisions", record_access=True)
+
+# Disable access recording (for read-only queries)
+result = kernel.recall("my decisions", record_access=False)
 ```
 
 ### Contextual Insights
@@ -513,17 +597,20 @@ Run the test suite:
 pytest tests/ -v
 ```
 
-All 142 tests pass, covering:
+All 182 tests pass, covering:
 
 - MemoryNode creation and validation
 - Intent classification (20+ patterns)
+- Epistemic state classification and properties
+- Memory access tracking and reinforcement
+- Memory decay calculations
 - Storage CRUD operations
 - Query functionality
 - Kernel ingestion pipeline
 - Evolution linking and conflict detection
 - Temporal summarization
 - Query parsing and understanding
-- Importance scoring
+- Importance scoring with reinforcement and decay
 - Insight generation
 - Recall engine orchestration
 - Domain constraint validation
@@ -640,10 +727,10 @@ Mnemos supports optional LLM integration for enhanced capabilities:
 
 Future enhancements planned for Mnemos:
 
-- **Memory Reinforcement**: Increase importance when memories are recalled
-- **Memory Decay**: Gradually reduce importance for long-unused memories
-- **Epistemic States**: Distinguish between facts, beliefs, and decisions
-- **Evolution Semantics**: Formalize link types (REFINES, CORRECTS, REINFORCES)
+- **Embedding-Based Similarity**: Use vector embeddings for more accurate memory similarity
+- **LLM-Powered Summarization**: Generate more coherent temporal summaries with LLM assistance
+- **Conflict Resolution Suggestions**: Propose resolutions when contradictions are detected
+- **Custom Weight Configuration**: Allow fine-tuning of importance scoring weights
 
 ## License
 

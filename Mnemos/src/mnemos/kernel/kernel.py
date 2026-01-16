@@ -479,7 +479,8 @@ class MnemosKernel:
         self,
         query: str,
         limit: Optional[int] = None,
-        generate_insights: bool = True
+        generate_insights: bool = True,
+        record_access: bool = True
     ) -> RecallResult:
         """
         Execute an intelligent recall query.
@@ -492,6 +493,7 @@ class MnemosKernel:
             query: Natural language query string
             limit: Maximum results to return
             generate_insights: Whether to generate contextual insights
+            record_access: Whether to record access for returned memories (enables reinforcement)
             
         Returns:
             RecallResult with matching memories, scores, and insights
@@ -513,7 +515,8 @@ class MnemosKernel:
         return self.recall_engine.recall(
             query=query,
             limit=limit,
-            generate_insights=generate_insights
+            generate_insights=generate_insights,
+            record_access=record_access
         )
     
     def _basic_recall(
