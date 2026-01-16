@@ -5,7 +5,7 @@
 **A memory kernel that evolves. It does not merely store data—it understands how knowledge changes over time.**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-23%20passing-green.svg)](https://github.com/mnemos-project/mnemos)
+[![Tests](https://img.shields.io/badge/tests-47%20passing-green.svg)](https://github.com/mnemos-project/mnemos)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
@@ -30,7 +30,7 @@ Mnemos follows a **4-layer architecture** designed for incremental development:
                           ▲
 ┌─────────────────────────────────────────────────────────────┐
 │  LAYER 3: Recall Engine                                     │
-│  Query → Memory resolution, importance scoring              │
+│  Query → Memory resolution, importance scoring, insights     │
 └─────────────────────────────────────────────────────────────┘
                           ▲
 ┌─────────────────────────────────────────────────────────────┐
@@ -88,6 +88,18 @@ The killer feature. Mnemos doesn't just store memories—it connects them:
 
 4. **Temporal Summaries**: Auto-generated daily, weekly, and monthly synthesis of knowledge evolution.
 
+### Recall Engine (Layer 3)
+
+Intelligent memory retrieval that goes beyond simple keyword search:
+
+1. **Natural Language Querying**: Ask questions like "What decisions did I make today?" and get relevant results.
+
+2. **Importance Scoring**: Results are ranked by importance, not just relevance. Decisions and actions surface first.
+
+3. **Contextual Insights**: Automatically generated insights reveal themes, patterns, and connections across your memories.
+
+4. **Similar Memory Discovery**: Find related memories based on semantic similarity.
+
 ## Quick Start
 
 ### Installation
@@ -121,10 +133,17 @@ print(f"Memory created: {memory.id}")
 print(f"Intent: {memory.intent.value}")
 print(f"Confidence: {memory.confidence:.2f}")
 
-# Query memories
-results = kernel.recall(query="pricing")
-for memory in results:
-    print(f"- {memory.raw_text[:80]}...")
+# Intelligent recall with natural language query
+result = kernel.recall(query="What decisions did I make about pricing?")
+for item in result.memories:
+    print(f"- {item.raw_text[:80]}...")
+    print(f"  Importance Score: {result.scores[item.id].total:.2f}")
+
+# View generated insights
+if result.insights:
+    for insight in result.insights.insights:
+        print(f"\n[{insight.type.value}] {insight.title}")
+        print(f"  {insight.description}")
 ```
 
 ### Running the API Server
@@ -146,15 +165,47 @@ python main.py --mode shell
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/ingest` | Ingest a transcript and create a memory |
+| `POST` | `/recall` | Execute intelligent recall query |
+| `GET` | `/recall` | Execute recall query (GET method) |
+| `GET` | `/memories/similar/{id}` | Find similar memories |
+| `GET` | `/memories/{id}/context` | Get memory with full context |
 | `GET` | `/memories` | Query memories with filters |
 | `GET` | `/memories/{id}` | Retrieve a specific memory |
 | `GET` | `/memories/{id}/evolution` | Get evolution chain for a memory |
+| `GET` | `/memories/{id}/links` | Get evolution links |
 | `GET` | `/memories/conflicts` | Retrieve all detected contradictions |
 | `GET` | `/recent` | Get the most recent memories |
 | `POST` | `/evolution/summarize` | Generate a temporal summary |
 | `GET` | `/evolution/summaries` | Retrieve past summaries |
 | `GET` | `/stats` | Get system statistics |
 | `GET` | `/health` | Health check endpoint |
+
+### Example: Intelligent Recall via API
+
+```bash
+# Natural language query
+curl -X POST "http://localhost:8000/recall" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What decisions did I make today about pricing?", "limit": 10, "generate_insights": true}'
+
+# Response includes:
+# - Matched memories ranked by importance
+# - Importance score breakdown
+# - Auto-generated insights about themes and patterns
+```
+
+### Example: Memory Context
+
+```bash
+# Get full context for a memory
+curl "http://localhost:8000/memories/{memory_id}/context"
+
+# Returns:
+# - Memory data
+# - Importance score and breakdown
+# - Evolution chain
+# - Contextual insights
+```
 
 ## Configuration
 
@@ -192,14 +243,22 @@ mnemos/
 │   ├── api/
 │   │   ├── __init__.py      # API exports
 │   │   └── api.py           # FastAPI REST endpoints
-│   └── evolution/           # Layer 2: Evolution Intelligence
+│   ├── evolution/           # Layer 2: Evolution Intelligence
+│   │   ├── __init__.py
+│   │   ├── linker.py        # Semantic memory linking
+│   │   ├── comparator.py    # Conflict/repetition detection
+│   │   └── summarizer.py    # Temporal summary generation
+│   └── recall/              # Layer 3: Recall Engine
 │       ├── __init__.py
-│       ├── linker.py        # Semantic memory linking
-│       ├── comparator.py    # Conflict/repetition detection
-│       └── summarizer.py    # Temporal summary generation
+│       ├── query_parser.py  # Natural language query parsing
+│       ├── importance_scorer.py  # Memory importance scoring
+│       ├── insight_generator.py  # Insight generation
+│       └── recall_engine.py # Main recall orchestrator
 └── tests/
     ├── __init__.py
-    └── test_memory.py       # 23 passing tests
+    ├── test_memory.py       # Layer 1 tests
+    ├── test_evolution.py    # Layer 2 tests
+    └── test_recall.py       # Layer 3 tests
 ```
 
 ## Layer 2: Evolution Intelligence
@@ -250,6 +309,78 @@ summary = kernel.generate_summary(
 #          There was a shift in opinion regarding Z..."
 ```
 
+## Layer 3: Recall Engine
+
+### Natural Language Querying
+
+The recall engine understands natural language queries:
+
+```python
+# Query patterns
+result = kernel.recall("What decisions did I make today?")
+result = kernel.recall("My questions about the project")
+result = kernel.recall("Recent ideas about pricing")
+result = kernel.recall("What was I working on last week?")
+```
+
+### Importance Scoring
+
+Every recalled memory includes an importance score based on:
+
+- **Intent Type**: Decisions and actions score higher than ideas
+- **Entity Mentions**: Memories with dates, numbers, and specific entities rank higher
+- **Recency**: Recent memories are prioritized
+- **Content Characteristics**: Specific language (urgency, amounts) increases score
+- **Evolution Context**: Memories that are part of evolution chains are valued higher
+
+```python
+result = kernel.recall("pricing decisions")
+
+for memory in result.memories:
+    score = result.scores[memory.id]
+    print(f"Memory: {memory.raw_text[:50]}...")
+    print(f"  Total Score: {score.total:.2f}")
+    print(f"  Intent Score: {score.intent_score:.2f}")
+    print(f"  Recency Score: {score.recency_score:.2f}")
+```
+
+### Contextual Insights
+
+The recall engine automatically generates insights from your memories:
+
+```python
+result = kernel.recall("my work this week", generate_insights=True)
+
+if result.insights:
+    for insight in result.insights.insights:
+        print(f"[{insight.type.value}] {insight.title}")
+        print(f"  {insight.description}")
+        
+        if insight.evidence:
+            print(f"  Evidence: {insight.evidence}")
+```
+
+Insight types include:
+- **THEME**: Common topics across memories
+- **DECISION_TRACKER**: Decision evolution and changes
+- **QUESTION_STATUS**: Open and answered questions
+- **ACTION_ITEMS**: Pending action items with urgency
+- **PATTERN**: Recurring patterns detected
+- **TEMPORAL_PATTERN**: Time-based activity patterns
+
+### Similar Memory Discovery
+
+Find related memories based on semantic similarity:
+
+```python
+# Get similar memories
+memory = kernel.get_memory("specific-memory-id")
+similar = kernel.search_similar(memory.id, limit=5)
+
+for s in similar:
+    print(f"Similar: {s.raw_text[:80]}...")
+```
+
 ## Testing
 
 Run the test suite:
@@ -258,12 +389,18 @@ Run the test suite:
 pytest tests/ -v
 ```
 
-All 23 tests pass, covering:
+All 47 tests pass, covering:
 - MemoryNode creation and validation
 - Intent classification (20+ patterns)
 - Storage CRUD operations
 - Query functionality
 - Kernel ingestion pipeline
+- Evolution linking and conflict detection
+- Temporal summarization
+- Query parsing and understanding
+- Importance scoring
+- Insight generation
+- Recall engine orchestration
 
 ## Contributing
 
@@ -273,6 +410,17 @@ Mnemos is designed to be extended. To add a new domain constraint (Layer 4):
 2. Implement validators for your domain (e.g., GST validation for accounting)
 3. Register validators with the kernel configuration
 4. The kernel will automatically apply constraints during ingestion
+
+## Layer 4: Domain Constraints (Coming Soon)
+
+Future Layer 4 will enable domain-specific validation and rules:
+
+```python
+# Example: Accounting constraints
+kernel.add_constraint(GSTValidator())
+kernel.add_constraint(InvoiceValidator())
+kernel.add_constraint(DateConsistencyValidator())
+```
 
 ## License
 

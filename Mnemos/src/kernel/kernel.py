@@ -5,13 +5,15 @@ The kernel is the central orchestrator of the Mnemos system. It coordinates
 the flow of data through the memory processing pipeline, from raw transcript
 ingestion to memory storage and retrieval.
 
-This module implements Layer 1 (Memory Kernel) and Layer 2 (Evolution Intelligence):
+This module implements Layer 1 (Memory Kernel), Layer 2 (Evolution Intelligence),
+and Layer 3 (Recall Engine):
 - Memory ingestion from VoiceInk transcripts
 - Intent classification
 - Entity and topic extraction
 - Evolution linking and conflict detection
 - Temporal summarization
 - Memory storage and retrieval
+- Intelligent recall with query parsing and importance scoring
 """
 
 from datetime import datetime, timedelta
@@ -24,6 +26,7 @@ from ..storage.memory_store import MemoryStore
 from ..evolution.linker import EvolutionLinker, MemoryLink, LinkType
 from ..evolution.comparator import EvolutionComparator, RelationshipResult, RelationshipType
 from ..evolution.summarizer import TemporalSummarizer, TemporalSummary, SummaryPeriod
+from ..recall import RecallEngine, RecallResult
 
 
 class TranscriptInput:
@@ -96,7 +99,7 @@ class MnemosKernel:
     3. Extracts entities and topics
     4. Stores structured memories
     5. Triggers evolution linking (Layer 2)
-    6. Provides recall capabilities
+    6. Provides intelligent recall (Layer 3)
     
     This is the central component that all other layers build upon.
     The kernel intentionally maintains a minimal surface area, delegating
@@ -105,9 +108,10 @@ class MnemosKernel:
     Attributes:
         store: Memory storage backend
         classifier: Intent classification module
-        linker: Evolution linking module
-        comparator: Evolution comparison module
-        summarizer: Temporal summarization module
+        linker: Evolution linking module (Layer 2)
+        comparator: Evolution comparison module (Layer 2)
+        summarizer: Temporal summarization module (Layer 2)
+        recall_engine: Intelligent recall engine (Layer 3)
         config: Kernel configuration
     """
     
@@ -116,7 +120,10 @@ class MnemosKernel:
         storage_dir: str = "./data",
         enable_llm_classification: bool = False,
         llm_provider: Optional[str] = None,
-        enable_evolution: bool = True
+        enable_evolution: bool = True,
+        enable_recall: bool = True,
+        recall_insights: bool = True,
+        recall_limit: int = 20
     ):
         """
         Initialize the Mnemos kernel.
@@ -126,6 +133,9 @@ class MnemosKernel:
             enable_llm_classification: Whether to use LLM fallback for intent
             llm_provider: Optional LLM provider name
             enable_evolution: Whether to enable Layer 2 evolution intelligence
+            enable_recall: Whether to enable Layer 3 recall engine
+            recall_insights: Whether to generate insights during recall
+            recall_limit: Default limit for recall results
         """
         self.store = MemoryStore(storage_dir)
         self.classifier = IntentClassifier(
@@ -140,11 +150,24 @@ class MnemosKernel:
             self.comparator = EvolutionComparator(use_llm=False)
             self.summarizer = TemporalSummarizer(storage_dir=storage_dir)
         
+        # Layer 3: Recall Engine
+        self.enable_recall = enable_recall
+        if enable_recall:
+            self.recall_engine = RecallEngine(
+                storage_dir=storage_dir,
+                enable_insights=recall_insights,
+                default_limit=recall_limit,
+                store=self.store  # Pass the shared store
+            )
+        
         self.config = {
             "storage_dir": storage_dir,
             "llm_enabled": enable_llm_classification,
             "llm_provider": llm_provider,
-            "evolution_enabled": enable_evolution
+            "evolution_enabled": enable_evolution,
+            "recall_enabled": enable_recall,
+            "recall_insights": recall_insights,
+            "recall_limit": recall_limit
         }
     
     def ingest(self, transcript_input: TranscriptInput) -> MemoryNode:
@@ -330,54 +353,61 @@ class MnemosKernel:
     
     def recall(
         self,
-        query: Optional[str] = None,
-        topic: Optional[str] = None,
-        intent: Optional[MemoryIntent] = None,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        limit: int = 20
-    ) -> List[MemoryNode]:
+        query: str,
+        limit: Optional[int] = None,
+        generate_insights: bool = True
+    ) -> RecallResult:
         """
-        Query memories based on various criteria.
+        Execute an intelligent recall query.
         
-        This is the primary interface for memory retrieval. It supports
-        multiple query dimensions that can be combined for precise recall.
+        This is the primary interface for Layer 3 memory retrieval.
+        The method uses natural language understanding to parse queries,
+        ranks results by importance, and optionally generates insights.
         
         Args:
-            query: Optional text search query
-            topic: Optional topic filter
-            intent: Optional intent filter
-            start_time: Optional start of time range
-            end_time: Optional end of time range
-            limit: Maximum number of results
+            query: Natural language query string
+            limit: Maximum results to return
+            generate_insights: Whether to generate contextual insights
             
         Returns:
-            List of matching memory nodes
+            RecallResult with matching memories, scores, and insights
         """
-        results: List[MemoryNode] = []
-        
-        # Apply topic filter first (most selective)
-        if topic:
-            results = self.store.query_by_topic(topic)
-        elif intent:
-            results = self.store.query_by_intent(intent)
-        elif start_time or end_time:
-            results = self.store.query_by_time_range(
-                start_time or datetime.min,
-                end_time or datetime.utcnow()
+        if not self.enable_recall:
+            # Fall back to basic recall
+            from .kernel import TranscriptInput
+            memories = self._basic_recall(query, limit)
+            from ..recall.importance_scorer import ImportanceScorer
+            scorer = ImportanceScorer()
+            scores = scorer.batch_score(memories)
+            return RecallResult(
+                memories=memories,
+                scores=scores,
+                query=None,
+                total_found=len(memories)
             )
-        else:
-            results = self.store.query_recent(limit)
         
-        # Apply additional filters
-        if query:
-            query_lower = query.lower()
-            results = [
-                m for m in results 
-                if query_lower in m.raw_text.lower()
-            ]
+        return self.recall_engine.recall(
+            query=query,
+            limit=limit,
+            generate_insights=generate_insights
+        )
+    
+    def _basic_recall(
+        self,
+        query: str,
+        limit: Optional[int] = None
+    ) -> List[MemoryNode]:
+        """Basic keyword-based recall (fallback when recall is disabled)."""
+        results: List[MemoryNode] = []
+        query_lower = query.lower()
         
-        return results[:limit]
+        # Simple keyword matching
+        all_memories = list(self.store.iter_all())
+        for memory in all_memories:
+            if query_lower in memory.raw_text.lower():
+                results.append(memory)
+        
+        return results[:limit] if limit else results
     
     def recall_evolution(self, memory_id: str) -> List[MemoryNode]:
         """
@@ -405,6 +435,51 @@ class MnemosKernel:
             The memory node if found, None otherwise
         """
         return self.store.retrieve(memory_id)
+    
+    def get_memory_with_context(
+        self,
+        memory_id: str,
+        include_evolution: bool = True,
+        include_insights: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Get a memory with full context including insights.
+        
+        Args:
+            memory_id: The memory ID to retrieve
+            include_evolution: Whether to include evolution chain
+            include_insights: Whether to generate insights
+            
+        Returns:
+            Dictionary with memory and context information
+        """
+        if not self.enable_recall:
+            memory = self.get_memory(memory_id)
+            if not memory:
+                return {"error": "Memory not found"}
+            return {"memory": memory.to_dict()}
+        
+        return self.recall_engine.get_memory_with_context(
+            memory_id=memory_id,
+            include_evolution=include_evolution,
+            include_insights=include_insights
+        )
+    
+    def search_similar(self, memory_id: str, limit: int = 5) -> List[MemoryNode]:
+        """
+        Find memories similar to a given memory.
+        
+        Args:
+            memory_id: The reference memory ID
+            limit: Maximum results to return
+            
+        Returns:
+            List of similar memories
+        """
+        if not self.enable_recall:
+            return []
+        
+        return self.recall_engine.search_similar(memory_id, limit)
     
     def get_memory_links(self, memory_id: str) -> List[MemoryLink]:
         """
@@ -610,8 +685,9 @@ class MnemosKernel:
         stats = {
             "storage": store_stats,
             "classifier": classifier_stats,
-            "kernel_version": "0.2.0",
-            "layer_2_enabled": self.enable_evolution
+            "kernel_version": "0.3.0",
+            "layer_2_enabled": self.enable_evolution,
+            "layer_3_enabled": self.enable_recall
         }
         
         # Add evolution stats if enabled
@@ -620,6 +696,10 @@ class MnemosKernel:
                 "links": self.linker.get_link_stats(),
                 "summaries": self.summarizer.get_summary_stats()
             }
+        
+        # Add recall stats if enabled
+        if self.enable_recall:
+            stats["recall"] = self.recall_engine.get_stats()
         
         return stats
     

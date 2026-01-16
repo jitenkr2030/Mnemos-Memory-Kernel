@@ -299,7 +299,8 @@ class TestMnemosKernel:
         
         self.kernel.ingest(transcript)
         
-        memories = self.kernel.recall()
+        # Use get_recent_memories for basic retrieval
+        memories = self.kernel.get_recent_memories(10)
         assert len(memories) == 1
         assert memories[0].intent == MemoryIntent.ACTION
     
@@ -308,9 +309,9 @@ class TestMnemosKernel:
         self.kernel.ingest(TranscriptInput(text="Pricing discussion", timestamp=datetime.utcnow()))
         self.kernel.ingest(TranscriptInput(text="Architecture design", timestamp=datetime.utcnow()))
         
-        results = self.kernel.recall(query="pricing")
-        assert len(results) == 1
-        assert "pricing" in results[0].raw_text.lower()
+        result = self.kernel.recall(query="pricing")
+        assert len(result.memories) == 1
+        assert "pricing" in result.memories[0].raw_text.lower()
     
     def test_get_stats(self):
         """Test getting system statistics."""

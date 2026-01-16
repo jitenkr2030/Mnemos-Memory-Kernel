@@ -3,10 +3,11 @@ FastAPI Web Interface for Mnemos
 
 This module provides a REST API for interacting with the Mnemos kernel.
 The API enables external applications to ingest transcripts, query memories,
-and manage the memory system with Layer 2 Evolution Intelligence support.
+and manage the memory system with Layer 2 Evolution Intelligence and
+Layer 3 Recall Engine support.
 
 The API is designed to be minimal and focused on the core kernel operations,
-with additional endpoints for evolution intelligence.
+with additional endpoints for evolution intelligence and intelligent recall.
 """
 
 from datetime import datetime
@@ -18,6 +19,7 @@ from pydantic import BaseModel, Field
 from ..kernel import MnemosKernel, TranscriptInput
 from ..kernel.memory_node import MemoryNode, MemoryIntent
 from ..evolution.summarizer import SummaryPeriod
+from ..recall import RecallResult
 
 
 # Pydantic models for API request/response
@@ -55,6 +57,49 @@ class MemoryResponse(BaseModel):
         )
 
 
+class RecallRequest(BaseModel):
+    """Request model for intelligent recall queries."""
+    query: str = Field(..., min_length=1, description="Natural language query")
+    limit: Optional[int] = Field(default=20, ge=1, le=100, description="Maximum results")
+    generate_insights: bool = Field(default=True, description="Whether to generate insights")
+    include_scores: bool = Field(default=True, description="Include importance scores")
+
+
+class RecallResultResponse(BaseModel):
+    """Response model for recall query results."""
+    query: Dict[str, Any]
+    total_found: int
+    returned_count: int
+    execution_time_ms: float
+    memories: List[Dict[str, Any]]
+    insights: Optional[Dict[str, Any]] = None
+    
+    @classmethod
+    def from_recall_result(cls, result: RecallResult) -> "RecallResultResponse":
+        """Create response from RecallResult."""
+        return cls(
+            query=result.query.to_dict() if result.query else {"raw_query": "unknown"},
+            total_found=result.total_found,
+            returned_count=len(result.memories),
+            execution_time_ms=result.execution_time_ms,
+            memories=[
+                {
+                    "memory": m.to_summary(),
+                    "importance_score": result.scores[m.id].total,
+                    "score_breakdown": result.scores[m.id].factors
+                }
+                for m in result.memories
+            ],
+            insights=result.insights.to_dict() if result.insights else None
+        )
+
+
+class SimilarMemoriesRequest(BaseModel):
+    """Request model for finding similar memories."""
+    memory_id: str = Field(..., description="Reference memory ID")
+    limit: Optional[int] = Field(default=5, ge=1, le=20, description="Maximum results")
+
+
 class QueryRequest(BaseModel):
     """Request model for querying memories."""
     query: Optional[str] = Field(None, description="Text search query")
@@ -72,6 +117,7 @@ class StatsResponse(BaseModel):
     topic_count: int
     storage_dir: str
     layer_2_enabled: bool = True
+    layer_3_enabled: bool = True
 
 
 class MemoryLinkResponse(BaseModel):
@@ -146,8 +192,8 @@ class SummaryGenerateRequest(BaseModel):
 # Create FastAPI application
 app = FastAPI(
     title="Mnemos API",
-    description="Memory Kernel API for personal knowledge management with Evolution Intelligence",
-    version="0.2.0"
+    description="Memory Kernel API for personal knowledge management with Evolution Intelligence and Intelligent Recall",
+    version="0.3.0"
 )
 
 # Global kernel instance
@@ -195,6 +241,122 @@ async def ingest_transcript(request: TranscriptRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/recall", response_model=RecallResultResponse)
+async def recall_memories(request: RecallRequest):
+    """
+    Execute an intelligent recall query.
+    
+    This endpoint uses Layer 3 Recall Engine to:
+    - Parse natural language queries
+    - Rank results by importance
+    - Generate contextual insights
+    
+    Example queries:
+    - "What decisions did I make today?"
+    - "My questions about the project"
+    - "Recent ideas about pricing"
+    """
+    kernel = get_kernel()
+    
+    if not kernel.enable_recall:
+        raise HTTPException(
+            status_code=400,
+            detail="Recall engine is not enabled. Initialize kernel with enable_recall=True"
+        )
+    
+    result = kernel.recall(
+        query=request.query,
+        limit=request.limit,
+        generate_insights=request.generate_insights
+    )
+    
+    return RecallResultResponse.from_recall_result(result)
+
+
+@app.get("/recall", response_model=RecallResultResponse)
+async def recall_get(
+    query: str = Query(..., min_length=1, description="Natural language query"),
+    limit: int = Query(20, ge=1, le=100),
+    generate_insights: bool = Query(True)
+):
+    """
+    Execute an intelligent recall query (GET method).
+    
+    Convenience endpoint for simple recall queries via GET.
+    """
+    kernel = get_kernel()
+    
+    if not kernel.enable_recall:
+        raise HTTPException(
+            status_code=400,
+            detail="Recall engine is not enabled"
+        )
+    
+    result = kernel.recall(
+        query=query,
+        limit=limit,
+        generate_insights=generate_insights
+    )
+    
+    return RecallResultResponse.from_recall_result(result)
+
+
+@app.get("/memories/similar/{memory_id}", response_model=List[MemoryResponse])
+async def get_similar_memories(
+    memory_id: str,
+    limit: int = Query(5, ge=1, le=20)
+):
+    """
+    Find memories similar to a given memory.
+    
+    Uses semantic similarity to find related memories based on
+    topics, entities, and content.
+    """
+    kernel = get_kernel()
+    
+    if not kernel.enable_recall:
+        raise HTTPException(
+            status_code=400,
+            detail="Recall engine is not enabled"
+        )
+    
+    similar = kernel.search_similar(memory_id, limit)
+    
+    if not similar:
+        # Check if memory exists
+        memory = kernel.get_memory(memory_id)
+        if memory is None:
+            raise HTTPException(status_code=404, detail="Reference memory not found")
+        return []
+    
+    return [MemoryResponse.from_memory(m, include_raw=True) for m in similar]
+
+
+@app.get("/memories/{memory_id}/context")
+async def get_memory_context(memory_id: str):
+    """
+    Get a memory with full context including evolution chain and insights.
+    
+    Returns comprehensive information about a memory including:
+    - The memory itself
+    - Importance score and breakdown
+    - Evolution chain (if enabled)
+    - Contextual insights (if enabled)
+    """
+    kernel = get_kernel()
+    
+    context = kernel.get_memory_with_context(
+        memory_id=memory_id,
+        include_evolution=kernel.enable_evolution,
+        include_insights=kernel.enable_recall
+    )
+    
+    if "error" in context:
+        raise HTTPException(status_code=404, detail=context["error"])
+    
+    return context
+
+
 @app.get("/memories", response_model=List[MemoryResponse])
 async def query_memories(
     query: Optional[str] = Query(None, description="Text search query"),
@@ -224,15 +386,11 @@ async def query_memories(
             )
     
     memories = kernel.recall(
-        query=query,
-        topic=topic,
-        intent=intent_enum,
-        start_time=start_time,
-        end_time=end_time,
+        query=query or "",
         limit=limit
     )
     
-    return [MemoryResponse.from_memory(m) for m in memories]
+    return [MemoryResponse.from_memory(m) for m in memories.memories]
 
 
 @app.get("/memories/{memory_id}", response_model=MemoryResponse)
@@ -405,7 +563,7 @@ async def get_recent_memories(count: int = Query(10, ge=1, le=100)):
 @app.get("/stats", response_model=StatsResponse)
 async def get_stats():
     """
-    Get system statistics including evolution intelligence metrics.
+    Get system statistics including evolution and recall metrics.
     """
     kernel = get_kernel()
     stats = kernel.get_stats()
@@ -415,7 +573,8 @@ async def get_stats():
         by_intent=stats["storage"]["by_intent"],
         topic_count=stats["storage"]["topic_count"],
         storage_dir=stats["storage"]["storage_dir"],
-        layer_2_enabled=stats.get("layer_2_enabled", True)
+        layer_2_enabled=stats.get("layer_2_enabled", True),
+        layer_3_enabled=stats.get("layer_3_enabled", True)
     )
 
 
@@ -455,12 +614,19 @@ async def root():
     """
     API root endpoint with basic information.
     """
+    kernel = get_kernel()
+    stats = kernel.get_stats()
+    
     return {
         "service": "Mnemos Memory Kernel",
-        "version": "0.2.0",
-        "layer_2": "Evolution Intelligence enabled",
+        "version": "0.3.0",
+        "layer_2": "Evolution Intelligence enabled" if stats.get("layer_2_enabled") else "Evolution Intelligence disabled",
+        "layer_3": "Recall Engine enabled" if stats.get("layer_3_enabled") else "Recall Engine disabled",
         "endpoints": {
             "ingest": "POST /ingest",
+            "recall": "POST /recall or GET /recall",
+            "similar": "GET /memories/similar/{id}",
+            "context": "GET /memories/{id}/context",
             "query": "GET /memories",
             "memory": "GET /memories/{id}",
             "evolution": "GET /memories/{id}/evolution",
