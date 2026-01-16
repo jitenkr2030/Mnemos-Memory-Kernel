@@ -5,7 +5,7 @@
 **A memory kernel that evolves. It does not merely store data—it understands how knowledge changes over time.**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-47%20passing-green.svg)](https://github.com/mnemos-project/mnemos)
+[![Tests](https://img.shields.io/badge/tests-142%20passing-green.svg)](https://github.com/mnemos-project/mnemos)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
@@ -18,6 +18,33 @@ Mnemos is a **memory kernel** designed to transform raw voice transcripts into s
 
 Unlike simple note-taking apps or databases, Mnemos understands **context**, **temporal relationships**, and **knowledge evolution**. When you say something today that contradicts what you said last week, Mnemos notices. When a topic resurfaces after months of silence, Mnemos connects the threads.
 
+## What Mnemos Is / Is Not
+
+### Mnemos IS:
+
+- **A Memory Kernel**: A foundational infrastructure layer for storing, organizing, and retrieving memories
+- **Deterministic**: Predictable behavior where the same inputs produce the same outputs
+- **Extensible**: Designed to be embedded in larger systems, not to serve end-users directly
+- **Evolving Graph**: Treats memories as nodes in a temporal knowledge graph, not static records
+- **Privacy-Focused**: Stores data locally with no external dependencies or cloud services required
+
+### Mnemos IS NOT:
+
+- **An LLM or AI System**: While it can integrate with LLMs, the core memory operations are rule-based and deterministic
+- **A Chatbot or Assistant**: It provides memory infrastructure, not conversational interfaces
+- **A Vector Database**: While it supports semantic similarity, its primary value is in evolution tracking and temporal reasoning
+- **A "Magic Box"**: Every operation is auditable and explainable
+
+### Systems That Can Embed Mnemos
+
+Mnemos is designed as infrastructure for applications that need memory capabilities:
+
+- **Voice Assistants**: Capture, store, and recall conversation context
+- **Research Tools**: Track evolving understanding of complex topics over time
+- **Legal/Compliance Systems**: Maintain audit trails of decisions and their justifications
+- **Personal Knowledge Management**: Build a second brain that understands how your knowledge grows
+- **Decision Tracking Systems**: Record and trace the evolution of important choices
+
 ## Architecture
 
 Mnemos follows a **4-layer architecture** designed for incremental development:
@@ -26,6 +53,7 @@ Mnemos follows a **4-layer architecture** designed for incremental development:
 ┌─────────────────────────────────────────────────────────────┐
 │  LAYER 4: Domain Constraints (Plugins)                       │
 │  Validators, truth rules, specialized entity extraction      │
+│  GST, Invoice, Date, Email, URL, Currency, Phone validators  │
 └─────────────────────────────────────────────────────────────┘
                           ▲
 ┌─────────────────────────────────────────────────────────────┐
@@ -99,6 +127,21 @@ Intelligent memory retrieval that goes beyond simple keyword search:
 3. **Contextual Insights**: Automatically generated insights reveal themes, patterns, and connections across your memories.
 
 4. **Similar Memory Discovery**: Find related memories based on semantic similarity.
+
+### Domain Constraints (Layer 4)
+
+Mnemos includes a pluggable constraint system for domain-specific validation:
+
+- **GSTValidator**: Validates Indian Goods and Services Tax identification numbers
+- **InvoiceValidator**: Validates invoice patterns, amounts, and date consistency
+- **DateConsistencyValidator**: Checks for temporal logical errors
+- **EmailValidator**: Validates email addresses with disposable domain filtering
+- **URLValidator**: Validates website URLs
+- **CurrencyValidator**: Validates currency amounts with proper formatting
+- **PhoneNumberValidator**: Validates international phone numbers
+- **BusinessRuleValidator**: Framework for custom business logic
+
+Domain constraints ensure data integrity before memories are stored, making Mnemos suitable for compliance-critical applications.
 
 ## Quick Start
 
@@ -179,6 +222,9 @@ python main.py --mode shell
 | `GET` | `/evolution/summaries` | Retrieve past summaries |
 | `GET` | `/stats` | Get system statistics |
 | `GET` | `/health` | Health check endpoint |
+| `GET` | `/constraints` | List registered domain constraints |
+| `GET` | `/constraints/status` | Get constraint engine status |
+| `POST` | `/constraints/{id}/validate` | Validate a stored memory |
 
 ### Example: Intelligent Recall via API
 
@@ -224,41 +270,48 @@ Mnemos can be configured via environment variables:
 ## Project Structure
 
 ```
-mnemos/
+Mnemos/
 ├── main.py                    # Entry point for server and shell modes
 ├── requirements.txt           # Python dependencies
 ├── src/
-│   ├── __init__.py           # Package exports
-│   ├── config.py             # Configuration management
-│   ├── kernel/
-│   │   ├── __init__.py      # Kernel module exports
-│   │   ├── memory_node.py   # MemoryNode dataclass (core ABI)
-│   │   └── kernel.py        # MnemosKernel orchestrator
-│   ├── classifier/
-│   │   ├── __init__.py      # Classifier exports
-│   │   └── intent_classifier.py  # Rule-based intent classification
-│   ├── storage/
-│   │   ├── __init__.py      # Storage exports
-│   │   └── memory_store.py  # File-based JSON storage
-│   ├── api/
-│   │   ├── __init__.py      # API exports
-│   │   └── api.py           # FastAPI REST endpoints
-│   ├── evolution/           # Layer 2: Evolution Intelligence
-│   │   ├── __init__.py
-│   │   ├── linker.py        # Semantic memory linking
-│   │   ├── comparator.py    # Conflict/repetition detection
-│   │   └── summarizer.py    # Temporal summary generation
-│   └── recall/              # Layer 3: Recall Engine
-│       ├── __init__.py
-│       ├── query_parser.py  # Natural language query parsing
-│       ├── importance_scorer.py  # Memory importance scoring
-│       ├── insight_generator.py  # Insight generation
-│       └── recall_engine.py # Main recall orchestrator
+│   └── mnemos/
+│       ├── __init__.py       # Package exports
+│       ├── config.py         # Configuration management
+│       ├── kernel/
+│       │   ├── __init__.py   # Kernel module exports
+│       │   ├── memory_node.py  # MemoryNode dataclass (core ABI)
+│       │   └── kernel.py     # MnemosKernel orchestrator
+│       ├── classifier/
+│       │   ├── __init__.py   # Classifier exports
+│       │   └── intent_classifier.py  # Rule-based intent classification
+│       ├── storage/
+│       │   ├── __init__.py   # Storage exports
+│       │   └── memory_store.py  # File-based JSON storage
+│       ├── api/
+│       │   ├── __init__.py   # API exports
+│       │   └── api.py        # FastAPI REST endpoints
+│       ├── evolution/        # Layer 2: Evolution Intelligence
+│       │   ├── __init__.py
+│       │   ├── linker.py     # Semantic memory linking
+│       │   ├── comparator.py # Conflict/repetition detection
+│       │   └── summarizer.py # Temporal summary generation
+│       ├── recall/           # Layer 3: Recall Engine
+│       │   ├── __init__.py
+│       │   ├── query_parser.py  # Natural language query parsing
+│       │   ├── importance_scorer.py  # Memory importance scoring
+│       │   ├── insight_generator.py  # Insight generation
+│       │   └── recall_engine.py # Main recall orchestrator
+│       └── constraints/      # Layer 4: Domain Constraints
+│           ├── __init__.py
+│           ├── base.py       # Constraint base classes
+│           ├── constraint_engine.py  # Constraint registry and engine
+│           └── validators.py # Domain-specific validators
 └── tests/
     ├── __init__.py
     ├── test_memory.py       # Layer 1 tests
     ├── test_evolution.py    # Layer 2 tests
-    └── test_recall.py       # Layer 3 tests
+    ├── test_recall.py       # Layer 3 tests
+    └── test_constraints.py  # Layer 4 tests
 ```
 
 ## Layer 2: Evolution Intelligence
@@ -381,6 +434,77 @@ for s in similar:
     print(f"Similar: {s.raw_text[:80]}...")
 ```
 
+## Layer 4: Domain Constraints
+
+Domain constraints enable domain-specific validation before memories are stored. This is critical for compliance, data integrity, and specialized applications.
+
+### Why Domain Constraints Matter
+
+Domain constraints transform Mnemos from a general-purpose memory system into a specialized knowledge engine. Without constraints, any data can enter the memory system, leading to:
+
+- **Data Quality Issues**: Invalid formats, inconsistent data, or nonsensical entries
+- **Compliance Risks**: Lack of validation for regulated industries (finance, healthcare, legal)
+- **Poor Query Results**: Garbage in, garbage out—bad data produces bad insights
+- **Maintenance Burden**: Manual cleanup of invalid or duplicate memories
+
+With domain constraints, Mnemos:
+
+- **Enforces Data Integrity**: Invalid data is rejected or flagged before storage
+- **Enables Compliance**: Built-in validators for GST, invoices, dates, and more
+- **Improves Query Quality**: Only valid, meaningful memories enter the system
+- **Reduces Maintenance**: Automatic validation prevents data quality issues
+
+### Built-in Validators
+
+Mnemos includes several validators for common domains:
+
+```python
+from mnemos import GSTValidator, InvoiceValidator, EmailValidator, URLValidator
+
+# Configure kernel with constraints
+kernel = MnemosKernel(
+    storage_dir="./data",
+    enable_constraints=True
+)
+
+# Validators are automatically applied during ingestion
+kernel.add_constraint(GSTValidator())
+kernel.add_constraint(InvoiceValidator())
+kernel.add_constraint(EmailValidator())
+kernel.add_constraint(URLValidator())
+```
+
+### Creating Custom Constraints
+
+You can create custom constraints by implementing the BaseConstraint interface:
+
+```python
+from mnemos import BaseConstraint, ConstraintResult, ConstraintType
+
+class CustomValidator(BaseConstraint):
+    name = "custom_validator"
+    description = "Validates custom business rules"
+    constraint_type = ConstraintType.BUSINESS_RULE
+    
+    def validate(self, memory: MemoryNode) -> ConstraintResult:
+        # Your validation logic here
+        if "invalid" in memory.raw_text.lower():
+            return ConstraintResult(
+                passed=False,
+                message="Memory contains invalid content",
+                severity=ValidationSeverity.ERROR
+            )
+        return ConstraintResult(passed=True)
+
+kernel.add_constraint(CustomValidator())
+```
+
+### Constraint Severity Levels
+
+- **VIOLATION**: Prevents memory storage
+- **WARNING**: Allows storage but flags for review
+- **INFO**: Informational feedback only
+
 ## Testing
 
 Run the test suite:
@@ -389,7 +513,8 @@ Run the test suite:
 pytest tests/ -v
 ```
 
-All 47 tests pass, covering:
+All 142 tests pass, covering:
+
 - MemoryNode creation and validation
 - Intent classification (20+ patterns)
 - Storage CRUD operations
@@ -401,26 +526,124 @@ All 47 tests pass, covering:
 - Importance scoring
 - Insight generation
 - Recall engine orchestration
+- Domain constraint validation
+- Constraint engine registration and execution
+
+## Flagship Use Case: Research & Decision Tracking
+
+Mnemos excels at tracking how understanding evolves over time. Here's a complete example demonstrating the Research & Decision Tracking use case:
+
+### Scenario: Researching a Technical Decision
+
+```python
+from mnemos import MnemosKernel, TranscriptInput
+from datetime import datetime
+
+kernel = MnemosKernel(storage_dir="./research_data")
+
+# Phase 1: Initial Research (Facts)
+# We capture factual information we learn during research
+kernel.ingest(TranscriptInput(
+    text="PostgreSQL supports JSONB data type for semi-structured data",
+    timestamp=datetime.utcnow()
+))
+
+# Phase 2: Exploration (Beliefs/Ideas)
+# We capture our initial thoughts and hypotheses
+kernel.ingest(TranscriptInput(
+    text="NoSQL databases like MongoDB might be faster for document storage",
+    timestamp=datetime.utcnow()
+))
+
+# Phase 3: Evaluation (Decisions)
+# We capture our evaluation results as we test alternatives
+kernel.ingest(TranscriptInput(
+    text="After testing, JSONB in Postgres is faster than MongoDB for our use case",
+    timestamp=datetime.utcnow()
+))
+
+# Phase 4: Conclusion (Decision)
+# We capture the final decision with full context
+kernel.ingest(TranscriptInput(
+    text="We will use PostgreSQL with JSONB for the application database",
+    timestamp=datetime.utcnow()
+))
+
+# Query: Why did we make this decision?
+# Mnemos returns the decision with full evolution chain
+result = kernel.recall("Why did we choose PostgreSQL?")
+
+# The result demonstrates Mnemos's unique value:
+# It preserves not just what you decided, but WHY you decided it
+# Complete with the evolution of your understanding from exploration to conclusion
+```
+
+### Why This Use Case Matters
+
+The Research & Decision Tracking use case demonstrates Mnemos's unique value proposition:
+
+1. **Preserves Context**: Every decision is linked to the research and evaluation that informed it
+2. **Tracks Evolution**: Shows how understanding changed over time (initial hypothesis → evaluation → conclusion)
+3. **Enables Auditing**: Future reviewers can trace the complete decision-making process
+4. **Supports Learning**: Identifies patterns in how decisions were made (what worked, what didn't)
+5. **Connects Related Decisions**: Similar research threads can be linked across time
+
+This use case is particularly valuable for:
+- **Technical Architects**: Tracking technology selection decisions
+- **Product Managers**: Recording feature prioritization rationale
+- **Consultants**: Documenting client recommendation journeys
+- **Researchers**: Building literature review timelines
+- **Legal Teams**: Maintaining decision audit trails
 
 ## Contributing
 
-Mnemos is designed to be extended. To add a new domain constraint (Layer 4):
+Mnemos is designed to be extended. Key extension points:
 
-1. Create a new module in `src/constraints/`
-2. Implement validators for your domain (e.g., GST validation for accounting)
-3. Register validators with the kernel configuration
-4. The kernel will automatically apply constraints during ingestion
+### Adding a New Intent Type
 
-## Layer 4: Domain Constraints (Coming Soon)
+1. Add the intent to the `MemoryIntent` enum in `src/mnemos/kernel/memory_node.py`
+2. Update the intent classifier in `src/mnemos/classifier/intent_classifier.py`
+3. Add tests for the new intent
+4. Update documentation
 
-Future Layer 4 will enable domain-specific validation and rules:
+### Adding a New Evolution Link Type
 
-```python
-# Example: Accounting constraints
-kernel.add_constraint(GSTValidator())
-kernel.add_constraint(InvoiceValidator())
-kernel.add_constraint(DateConsistencyValidator())
-```
+1. Add the link type to the `LinkType` enum in `src/mnemos/evolution/linker.py`
+2. Update the evolution comparator in `src/mnemos/evolution/comparator.py`
+3. Add tests for the new link type behavior
+4. Document when and why the link is created
+
+### Adding a New Domain Constraint
+
+1. Create a new validator class in `src/mnemos/constraints/validators.py`
+2. Inherit from `BaseConstraint` and implement the `validate` method
+3. Register the validator with the kernel configuration
+4. Add tests for validation logic
+5. Document the validator's purpose and configuration
+
+## LLM Integration Guidelines
+
+Mnemos supports optional LLM integration for enhanced capabilities:
+
+- **Classification**: LLMs can improve intent classification accuracy
+- **Summarization**: LLMs can generate more coherent temporal summaries
+- **Query Understanding**: LLMs can parse complex natural language queries
+
+### Best Practices
+
+1. **Keep Deterministic Logic as Default**: Ensure the system works without LLMs
+2. **Use LLMs for Understanding, Not Truth**: LLMs help interpret, but memories are facts
+3. **Document Probabilistic Components**: Clearly mark which features use LLMs
+4. **Provide Fallbacks**: Always have rule-based alternatives for LLM-dependent features
+
+## Roadmap
+
+Future enhancements planned for Mnemos:
+
+- **Memory Reinforcement**: Increase importance when memories are recalled
+- **Memory Decay**: Gradually reduce importance for long-unused memories
+- **Epistemic States**: Distinguish between facts, beliefs, and decisions
+- **Evolution Semantics**: Formalize link types (REFINES, CORRECTS, REINFORCES)
 
 ## License
 
