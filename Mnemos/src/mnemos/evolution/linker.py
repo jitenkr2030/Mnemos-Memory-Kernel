@@ -26,13 +26,57 @@ class LinkType(Enum):
     
     These types describe how a new memory relates to past memories.
     The linker creates potential links; the comparator refines them.
+    
+    Semantic Categories:
+    - Positive Evolution: REFINES, REINFORCES, SUPPORTS (knowledge building)
+    - Negative/Corrective: CONTRADICTS, CORRECTS (knowledge revision)
+    - Neutral: RELATES_TO, REPEATS (knowledge organization)
+    - Challenging: QUESTIONS (knowledge inquiry)
     """
-    RELATES_TO = "relates_to"       # General topical relationship
-    REPEATS = "repeats"             # Similar content repeated
-    CONTRADICTS = "contradicts"     # Direct opposition
-    UPDATES = "updates"             # Refinement or supersession
-    SUPPORTS = "supports"           # Provides evidence for
-    QUESTIONS = "questions"         # Challenges or questions prior
+    
+    # Positive Evolution - Knowledge Building
+    REFINES = "refines"              # Adds detail or nuance to an existing memory
+    REINFORCES = "reinforces"        # Confirms or strengthens a previous memory
+    
+    # Corrective - Knowledge Revision  
+    CORRECTS = "corrects"            # Fixes an error or misconception in a previous memory
+    CONTRADICTS = "contradicts"     # Direct opposition to a previous statement
+    
+    # Neutral - Knowledge Organization
+    RELATES_TO = "relates_to"        # General topical relationship
+    REPEATS = "repeats"              # Similar content repeated
+    UPDATES = "updates"              # Supersedes or replaces previous information
+    
+    # Challenging - Knowledge Inquiry
+    SUPPORTS = "supports"            # Provides evidence for a previous memory
+    QUESTIONS = "questions"          # Challenges or questions a prior claim
+    
+    @property
+    def is_positive_evolution(self) -> bool:
+        """Check if this link type represents positive knowledge building."""
+        return self in (self.REFINES, self.REINFORCES, self.SUPPORTS)
+    
+    @property
+    def is_corrective(self) -> bool:
+        """Check if this link type represents knowledge revision."""
+        return self in (self.CORRECTS, self.CONTRADICTS)
+    
+    @property
+    def strength_impact(self) -> float:
+        """
+        Returns the expected impact on memory strength.
+        
+        Positive evolution types should strengthen the target memory.
+        Corrective types may weaken or flag the target memory.
+        """
+        if self.is_positive_evolution:
+            return 0.15  # Moderate strengthening
+        elif self == self.CORRECTS:
+            return -0.20  # Significant weakening (correction)
+        elif self == self.CONTRADICTS:
+            return -0.10  # Mild weakening (flagged for review)
+        else:
+            return 0.0  # Neutral impact
 
 
 @dataclass
@@ -50,6 +94,7 @@ class MemoryLink:
         strength: Semantic similarity strength (0.0-1.0)
         created_at: When this link was created
         context: Optional explanation of the relationship
+        bidirectional: Whether the relationship flows both ways
     """
     source_id: str
     target_id: str
@@ -57,6 +102,7 @@ class MemoryLink:
     strength: float = 0.5
     created_at: datetime = field(default_factory=datetime.utcnow)
     context: str = ""
+    bidirectional: bool = False  # If True, represents bidirectional relationship
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert link to dictionary representation."""
@@ -66,7 +112,8 @@ class MemoryLink:
             "link_type": self.link_type.value,
             "strength": self.strength,
             "created_at": self.created_at.isoformat(),
-            "context": self.context
+            "context": self.context,
+            "bidirectional": self.bidirectional
         }
     
     @classmethod
@@ -78,7 +125,8 @@ class MemoryLink:
             link_type=LinkType(data["link_type"]),
             strength=data.get("strength", 0.5),
             created_at=datetime.fromisoformat(data["created_at"]) if isinstance(data.get("created_at"), str) else data.get("created_at", datetime.utcnow()),
-            context=data.get("context", "")
+            context=data.get("context", ""),
+            bidirectional=data.get("bidirectional", False)
         )
 
 

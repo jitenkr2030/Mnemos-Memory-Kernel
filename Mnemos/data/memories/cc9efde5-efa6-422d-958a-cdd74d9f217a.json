@@ -1,0 +1,15 @@
+{
+  "id": "cc9efde5-efa6-422d-958a-cdd74d9f217a",
+  "timestamp": "2026-01-16T06:46:15.181802",
+  "raw_text": "This is a simple test thought",
+  "intent": "unknown",
+  "epistemic_state": "belief",
+  "topics": [],
+  "entities": [],
+  "confidence": 0.3,
+  "evolution_ref": [],
+  "embedding": null,
+  "access_count": 0,
+  "last_accessed_at": null,
+  "created_at": "2026-01-16T06:46:15.186129"
+}

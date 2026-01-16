@@ -10,7 +10,7 @@ from datetime import datetime
 import tempfile
 import shutil
 
-from mnemos import MemoryNode, MemoryIntent, Entity, EntityType, MnemosKernel, TranscriptInput
+from mnemos import MemoryNode, MemoryIntent, Entity, EntityType, EpistemicState, MnemosKernel, TranscriptInput
 from mnemos import IntentClassifier, MemoryStore
 
 
@@ -77,6 +77,273 @@ class TestMemoryNode:
         assert MemoryIntent.QUESTION.value == "question"
         assert MemoryIntent.REFLECTION.value == "reflection"
         assert MemoryIntent.ACTION.value == "action"
+
+
+class TestEpistemicState:
+    """Tests for EpistemicState functionality."""
+    
+    def test_epistemic_state_enum_values(self):
+        """Test that all epistemic state enum values exist."""
+        assert EpistemicState.FACT.value == "fact"
+        assert EpistemicState.BELIEF.value == "belief"
+        assert EpistemicState.DECISION.value == "decision"
+        assert EpistemicState.REFLECTION.value == "reflection"
+    
+    def test_epistemic_state_properties(self):
+        """Test epistemic state property methods."""
+        # FACT is objective
+        assert EpistemicState.FACT.is_objective is True
+        assert EpistemicState.FACT.is_subjective is False
+        assert EpistemicState.FACT.is_committed is False
+        
+        # BELIEF is subjective
+        assert EpistemicState.BELIEF.is_objective is False
+        assert EpistemicState.BELIEF.is_subjective is True
+        assert EpistemicState.BELIEF.is_committed is False
+        
+        # DECISION is committed
+        assert EpistemicState.DECISION.is_objective is False
+        assert EpistemicState.DECISION.is_subjective is False
+        assert EpistemicState.DECISION.is_committed is True
+        
+        # REFLECTION is committed
+        assert EpistemicState.REFLECTION.is_objective is False
+        assert EpistemicState.REFLECTION.is_subjective is False
+        assert EpistemicState.REFLECTION.is_committed is True
+    
+    def test_memory_node_default_epistemic_state(self):
+        """Test that default epistemic state is BELIEF for ideas."""
+        memory = MemoryNode(
+            raw_text="I think we should explore this direction",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        # Default should be BELIEF for non-decision intents
+        assert memory.epistemic_state == EpistemicState.BELIEF
+    
+    def test_memory_node_decision_auto_sets_epistemic_state(self):
+        """Test that DECISION intent auto-sets epistemic_state to DECISION."""
+        memory = MemoryNode(
+            raw_text="We will use PostgreSQL for the database",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.DECISION
+        )
+        
+        # Should auto-set to DECISION state
+        assert memory.epistemic_state == EpistemicState.DECISION
+    
+    def test_memory_node_reflection_auto_sets_epistemic_state(self):
+        """Test that REFLECTION intent auto-sets epistemic_state to REFLECTION."""
+        memory = MemoryNode(
+            raw_text="I realized that my initial approach was wrong",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.REFLECTION
+        )
+        
+        # Should auto-set to REFLECTION state
+        assert memory.epistemic_state == EpistemicState.REFLECTION
+    
+    def test_memory_node_explicit_epistemic_state(self):
+        """Test that explicit epistemic_state is respected."""
+        memory = MemoryNode(
+            raw_text="PostgreSQL supports JSONB",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA,
+            epistemic_state=EpistemicState.FACT
+        )
+        
+        assert memory.epistemic_state == EpistemicState.FACT
+    
+    def test_epistemic_state_serialization(self):
+        """Test that epistemic_state is serialized correctly."""
+        memory = MemoryNode(
+            raw_text="The meeting is at 3pm",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA,
+            epistemic_state=EpistemicState.FACT
+        )
+        
+        data = memory.to_dict()
+        
+        assert "epistemic_state" in data
+        assert data["epistemic_state"] == "fact"
+    
+    def test_epistemic_state_deserialization(self):
+        """Test that epistemic_state is deserialized correctly."""
+        memory = MemoryNode(
+            raw_text="Test content",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA,
+            epistemic_state=EpistemicState.BELIEF
+        )
+        
+        data = memory.to_dict()
+        restored = MemoryNode.from_dict(data)
+        
+        assert restored.epistemic_state == EpistemicState.BELIEF
+
+
+class TestMemoryAccessTracking:
+    """Tests for memory access tracking and reinforcement."""
+    
+    def test_default_access_count(self):
+        """Test that default access_count is 0."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        assert memory.access_count == 0
+        assert memory.last_accessed_at is None
+    
+    def test_record_access(self):
+        """Test recording memory access."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        memory.record_access()
+        
+        assert memory.access_count == 1
+        assert memory.last_accessed_at is not None
+        assert isinstance(memory.last_accessed_at, datetime)
+    
+    def test_multiple_accesses(self):
+        """Test multiple accesses increment count."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        for i in range(5):
+            memory.record_access()
+            assert memory.access_count == i + 1
+    
+    def test_reinforcement_score_first_access(self):
+        """Test reinforcement score after first access."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        memory.record_access()
+        
+        score = memory.get_reinforcement_score()
+        assert score > 0
+        assert score <= 1.0
+    
+    def test_reinforcement_score_logarithmic(self):
+        """Test that reinforcement score scales logarithmically."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        # Access multiple times
+        for _ in range(10):
+            memory.record_access()
+        
+        score = memory.get_reinforcement_score()
+        
+        # Should be significant but not maxed out
+        assert score > 0.2
+        assert score <= 1.0
+        
+        # Access many more times
+        for _ in range(100):
+            memory.record_access()
+        
+        high_score = memory.get_reinforcement_score()
+        assert high_score > score  # Should be higher with more accesses
+    
+    def test_decay_factor_no_decay_for_new_access(self):
+        """Test that recently accessed memories have no decay."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        memory.record_access()
+        
+        factor = memory.get_decay_factor()
+        # Should be essentially 1.0 (allowing for microsecond differences)
+        assert factor > 0.999
+    
+    def test_decay_factor_for_old_access(self):
+        """Test that old memories decay appropriately."""
+        from datetime import timedelta
+        
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        # Simulate access 30 days ago
+        memory.last_accessed_at = datetime.utcnow() - timedelta(days=30)
+        memory.access_count = 5
+        
+        factor = memory.get_decay_factor(decay_rate=0.01)
+        
+        # Should have some decay (1.0 - 0.01 * 30 = 0.7, but min 0.1)
+        assert factor < 1.0
+        assert factor >= 0.1  # Should not decay below minimum
+    
+    def test_decay_factor_never_accessed(self):
+        """Test that never-accessed memories don't decay."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        # Never accessed
+        factor = memory.get_decay_factor()
+        
+        assert factor == 1.0  # No decay for never-accessed memories
+    
+    def test_access_tracking_serialization(self):
+        """Test that access tracking fields are serialized."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        memory.record_access()
+        memory.record_access()
+        
+        data = memory.to_dict()
+        
+        assert "access_count" in data
+        assert data["access_count"] == 2
+        assert "last_accessed_at" in data
+        assert data["last_accessed_at"] is not None
+    
+    def test_access_tracking_deserialization(self):
+        """Test that access tracking fields are deserialized."""
+        memory = MemoryNode(
+            raw_text="Test memory",
+            timestamp=datetime.utcnow(),
+            intent=MemoryIntent.IDEA
+        )
+        
+        memory.record_access()
+        memory.record_access()
+        
+        data = memory.to_dict()
+        restored = MemoryNode.from_dict(data)
+        
+        assert restored.access_count == 2
+        assert restored.last_accessed_at is not None
 
 
 class TestIntentClassifier:

@@ -167,6 +167,143 @@ class TestEvolutionLinker:
         assert links[0].target_id == memory2.id
 
 
+class TestLinkTypeSemantics:
+    """Tests for formal evolution link type semantics."""
+    
+    def test_link_type_enum_values(self):
+        """Test that all link type enum values exist."""
+        # Positive evolution types
+        assert LinkType.REFINES.value == "refines"
+        assert LinkType.REINFORCES.value == "reinforces"
+        
+        # Corrective types
+        assert LinkType.CORRECTS.value == "corrects"
+        assert LinkType.CONTRADICTS.value == "contradicts"
+        
+        # Neutral types
+        assert LinkType.RELATES_TO.value == "relates_to"
+        assert LinkType.REPEATS.value == "repeats"
+        assert LinkType.UPDATES.value == "updates"
+        
+        # Challenging types
+        assert LinkType.SUPPORTS.value == "supports"
+        assert LinkType.QUESTIONS.value == "questions"
+    
+    def test_positive_evolution_types(self):
+        """Test that positive evolution types are identified correctly."""
+        # REFINES, REINFORCES, SUPPORTS are positive evolution
+        assert LinkType.REFINES.is_positive_evolution is True
+        assert LinkType.REINFORCES.is_positive_evolution is True
+        assert LinkType.SUPPORTS.is_positive_evolution is True
+        
+        # Other types are not positive evolution
+        assert LinkType.CONTRADICTS.is_positive_evolution is False
+        assert LinkType.CORRECTS.is_positive_evolution is False
+        assert LinkType.RELATES_TO.is_positive_evolution is False
+        assert LinkType.REPEATS.is_positive_evolution is False
+        assert LinkType.UPDATES.is_positive_evolution is False
+        assert LinkType.QUESTIONS.is_positive_evolution is False
+    
+    def test_corrective_types(self):
+        """Test that corrective types are identified correctly."""
+        # CORRECTS, CONTRADICTS are corrective
+        assert LinkType.CORRECTS.is_corrective is True
+        assert LinkType.CONTRADICTS.is_corrective is True
+        
+        # Other types are not corrective
+        assert LinkType.REFINES.is_corrective is False
+        assert LinkType.REINFORCES.is_corrective is False
+        assert LinkType.SUPPORTS.is_corrective is False
+        assert LinkType.RELATES_TO.is_corrective is False
+        assert LinkType.REPEATS.is_corrective is False
+        assert LinkType.UPDATES.is_corrective is False
+        assert LinkType.QUESTIONS.is_corrective is False
+    
+    def test_strength_impact_positive_evolution(self):
+        """Test strength impact for positive evolution types."""
+        # Positive evolution should have positive strength impact
+        assert LinkType.REFINES.strength_impact > 0
+        assert LinkType.REINFORCES.strength_impact > 0
+        assert LinkType.SUPPORTS.strength_impact > 0
+    
+    def test_strength_impact_corrective(self):
+        """Test strength impact for corrective types."""
+        # CORRECTS should have significant negative impact
+        assert LinkType.CORRECTS.strength_impact < 0
+        assert LinkType.CORRECTS.strength_impact == -0.20
+        
+        # CONTRADICTS should have mild negative impact
+        assert LinkType.CONTRADICTS.strength_impact < 0
+        assert LinkType.CONTRADICTS.strength_impact == -0.10
+    
+    def test_strength_impact_neutral(self):
+        """Test strength impact for neutral types."""
+        # Neutral types should have zero strength impact
+        assert LinkType.RELATES_TO.strength_impact == 0.0
+        assert LinkType.REPEATS.strength_impact == 0.0
+        assert LinkType.UPDATES.strength_impact == 0.0
+        assert LinkType.QUESTIONS.strength_impact == 0.0
+    
+    def test_memory_link_bidirectional_default(self):
+        """Test that MemoryLink bidirectional defaults to False."""
+        link = MemoryLink(
+            source_id="mem1",
+            target_id="mem2",
+            link_type=LinkType.RELATES_TO,
+            strength=0.8
+        )
+        
+        assert link.bidirectional is False
+    
+    def test_memory_link_bidirectional_explicit(self):
+        """Test that MemoryLink bidirectional can be set explicitly."""
+        link = MemoryLink(
+            source_id="mem1",
+            target_id="mem2",
+            link_type=LinkType.CONTRADICTS,
+            strength=0.8,
+            bidirectional=True
+        )
+        
+        assert link.bidirectional is True
+    
+    def test_memory_link_serialization_with_bidirectional(self):
+        """Test MemoryLink serialization includes bidirectional field."""
+        link = MemoryLink(
+            source_id="mem1",
+            target_id="mem2",
+            link_type=LinkType.REFINES,
+            strength=0.75,
+            context="Added more details",
+            bidirectional=True
+        )
+        
+        data = link.to_dict()
+        
+        assert "bidirectional" in data
+        assert data["bidirectional"] is True
+        assert data["link_type"] == "refines"
+        assert data["context"] == "Added more details"
+    
+    def test_memory_link_deserialization_with_bidirectional(self):
+        """Test MemoryLink deserialization includes bidirectional field."""
+        data = {
+            "source_id": "mem1",
+            "target_id": "mem2",
+            "link_type": "reinforces",
+            "strength": 0.9,
+            "created_at": datetime.utcnow().isoformat(),
+            "context": "Confirmed previous statement",
+            "bidirectional": True
+        }
+        
+        link = MemoryLink.from_dict(data)
+        
+        assert link.link_type == LinkType.REINFORCES
+        assert link.bidirectional is True
+        assert link.context == "Confirmed previous statement"
+
+
 class TestEvolutionComparator:
     """Tests for the evolution comparator."""
     

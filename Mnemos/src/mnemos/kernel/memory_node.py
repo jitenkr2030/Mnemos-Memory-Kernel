@@ -33,6 +33,55 @@ class MemoryIntent(Enum):
     UNKNOWN = "unknown"
 
 
+class EpistemicState(Enum):
+    """
+    Enumeration of epistemic states for memories.
+    
+    Epistemic state represents the nature of the knowledge claim in a memory,
+    distinguishing between objective facts, subjective beliefs, and committed
+    decisions. This distinction is critical for:
+    
+    - Research applications: Preserving the distinction between observed facts and interpretations
+    - Legal/compliance: Maintaining audit trails of what was decided vs. what was believed
+    - Personal knowledge: Understanding how your beliefs evolved over time
+    
+    The epistemic state is orthogonal to intent:
+    - A FACT can be an IDEA, QUESTION, or REFLECTION
+    - A BELIEF typically manifests as an IDEA or REFLECTION
+    - A DECISION is always a DECISION intent
+    """
+    FACT = "fact"              # Objective, verifiable truth or observation
+                            # Examples: "The meeting is at 3pm", "Paris is in France"
+                            # Default for: DATE, LOCATION entities with high confidence
+    
+    BELIEF = "belief"          # Subjective or probabilistic assertion
+                            # Examples: "I think the stock will go up", "Python is better"
+                            # Default for: IDEAS with hedging language
+    
+    DECISION = "decision"      # Committed choice or commitment
+                            # Examples: "We chose Postgres", "I'll go with option A"
+                            # Automatically set when intent is DECISION
+    
+    REFLECTION = "reflection"  # Meta-commentary on other memories or knowledge
+                            # Examples: "I was wrong about X", "My understanding changed"
+                            # Automatically set when intent is REFLECTION
+    
+    @property
+    def is_objective(self) -> bool:
+        """Check if this state represents objective knowledge."""
+        return self == self.FACT
+    
+    @property
+    def is_subjective(self) -> bool:
+        """Check if this state represents subjective knowledge."""
+        return self == self.BELIEF
+    
+    @property
+    def is_committed(self) -> bool:
+        """Check if this state represents a committed position."""
+        return self in (self.DECISION, self.REFLECTION)
+
+
 class EntityType(Enum):
     """
     Enumeration of entity types that can be extracted from memories.
@@ -99,20 +148,26 @@ class MemoryNode:
         timestamp: When this memory was captured
         raw_text: The verbatim transcript content
         intent: The purpose/category of this memory
+        epistemic_state: The nature of the knowledge claim (fact, belief, decision)
         topics: Semantic cluster identifiers this memory relates to
         entities: Extracted named elements from the text
         confidence: System certainty in classifications
         evolution_ref: Links to related past memory nodes
+        access_count: Number of times this memory has been accessed
+        last_accessed_at: Timestamp of last access (for reinforcement tracking)
     """
     raw_text: str
     timestamp: datetime
     intent: MemoryIntent
+    epistemic_state: EpistemicState = EpistemicState.BELIEF  # Default to belief
     topics: List[str] = field(default_factory=list)
     entities: List[Entity] = field(default_factory=list)
     confidence: float = 0.7
     evolution_ref: List[str] = field(default_factory=list)
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     embedding: Optional[List[float]] = None
+    access_count: int = 0  # For memory reinforcement tracking
+    last_accessed_at: Optional[datetime] = None  # For memory decay tracking
     
     def __post_init__(self):
         """Validate the memory node after initialization."""
@@ -125,8 +180,17 @@ class MemoryNode:
         if not isinstance(self.intent, MemoryIntent):
             raise ValueError("MemoryNode must have a valid MemoryIntent")
         
+        if not isinstance(self.epistemic_state, EpistemicState):
+            raise ValueError("MemoryNode must have a valid EpistemicState")
+        
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError("Confidence must be between 0.0 and 1.0")
+        
+        # Auto-set epistemic_state based on intent if not explicitly provided
+        if self.intent == MemoryIntent.DECISION:
+            self.epistemic_state = EpistemicState.DECISION
+        elif self.intent == MemoryIntent.REFLECTION:
+            self.epistemic_state = EpistemicState.REFLECTION
     
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -140,11 +204,14 @@ class MemoryNode:
             "timestamp": self.timestamp.isoformat(),
             "raw_text": self.raw_text,
             "intent": self.intent.value,
+            "epistemic_state": self.epistemic_state.value,
             "topics": self.topics,
             "entities": [e.to_dict() for e in self.entities],
             "confidence": self.confidence,
             "evolution_ref": self.evolution_ref,
             "embedding": self.embedding,
+            "access_count": self.access_count,
+            "last_accessed_at": self.last_accessed_at.isoformat() if self.last_accessed_at else None,
             "created_at": datetime.utcnow().isoformat()
         }
     
@@ -175,16 +242,23 @@ class MemoryNode:
             Entity.from_dict(e) for e in data.get("entities", [])
         ]
         
+        last_accessed = data.get("last_accessed_at")
+        if isinstance(last_accessed, str):
+            last_accessed = datetime.fromisoformat(last_accessed)
+        
         return cls(
             id=data.get("id", str(uuid.uuid4())),
             timestamp=datetime.fromisoformat(data["timestamp"]) if isinstance(data["timestamp"], str) else data["timestamp"],
             raw_text=data["raw_text"],
             intent=MemoryIntent(data["intent"]),
+            epistemic_state=EpistemicState(data.get("epistemic_state", "belief")),
             topics=data.get("topics", []),
             entities=entities,
             confidence=data.get("confidence", 0.7),
             evolution_ref=data.get("evolution_ref", []),
-            embedding=data.get("embedding")
+            embedding=data.get("embedding"),
+            access_count=data.get("access_count", 0),
+            last_accessed_at=last_accessed
         )
     
     def add_evolution_ref(self, memory_id: str) -> None:
@@ -230,6 +304,53 @@ class MemoryNode:
     def is_high_confidence(self) -> bool:
         """Check if this memory has high classification confidence."""
         return self.confidence >= 0.8
+    
+    def record_access(self) -> None:
+        """
+        Record that this memory has been accessed.
+        
+        This is used for memory reinforcement tracking. Each access
+        increases the access_count and updates last_accessed_at.
+        """
+        self.access_count += 1
+        self.last_accessed_at = datetime.utcnow()
+    
+    def get_reinforcement_score(self) -> float:
+        """
+        Calculate the reinforcement score based on access patterns.
+        
+        This score can be used during recall to boost frequently accessed
+        memories, simulating how reinforced memories are easier to recall.
+        
+        Returns:
+            A score between 0.0 and 1.0 based on access patterns
+        """
+        if self.access_count == 0:
+            return 0.0
+        
+        # Logarithmic scaling: each access has diminishing returns
+        import math
+        return min(1.0, 0.1 * math.log1p(self.access_count))
+    
+    def get_decay_factor(self, decay_rate: float = 0.01) -> float:
+        """
+        Calculate the decay factor for this memory.
+        
+        Memories that haven't been accessed for a while may decay in
+        importance. This is used during recall scoring.
+        
+        Args:
+            decay_rate: Daily decay rate (default 1% per day)
+            
+        Returns:
+            A factor between 0.0 and 1.0, where 1.0 is no decay
+        """
+        if self.last_accessed_at is None:
+            # Never accessed - no decay yet
+            return 1.0
+        
+        days_since_access = (datetime.utcnow() - self.last_accessed_at).total_seconds() / 86400
+        return max(0.1, 1.0 - (decay_rate * days_since_access))
     
     def __repr__(self) -> str:
         """String representation for debugging."""

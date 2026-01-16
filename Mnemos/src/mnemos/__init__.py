@@ -8,7 +8,7 @@ into structured, evolving memories with semantic understanding.
 __version__ = "0.4.0"
 __author__ = "Mnemos Development Team"
 
-from .kernel.memory_node import MemoryNode, MemoryIntent, Entity, EntityType
+from .kernel.memory_node import MemoryNode, MemoryIntent, EpistemicState, Entity, EntityType
 from .kernel.kernel import MnemosKernel, TranscriptInput
 from .storage.memory_store import MemoryStore
 from .classifier.intent_classifier import IntentClassifier
@@ -33,7 +33,8 @@ from .constraints import (
 
 __all__ = [
     "MemoryNode",
-    "MemoryIntent", 
+    "MemoryIntent",
+    "EpistemicState",
     "Entity",
     "EntityType",
     "MnemosKernel",
